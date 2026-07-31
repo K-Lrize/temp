@@ -1,0 +1,50 @@
+<%+header%>
+
+<h2><%:Sing-Box%></h2>
+
+<div class="cbi-section">
+  <div class="cbi-section-node">
+
+    <div style="margin-bottom:1.2em;">
+      <strong><%:Status%>：</strong>
+      <span id="sb-status" style="font-weight:bold;"><%:Checking...%></span>
+    </div>
+
+    <div>
+      <input type="button" class="btn cbi-button cbi-button-apply"
+             value="<%:Start%>"   onclick="sbCtrl('start')"   />
+      <input type="button" class="btn cbi-button cbi-button-negative"
+             value="<%:Stop%>"    onclick="sbCtrl('stop')"    />
+      <input type="button" class="btn cbi-button"
+             value="<%:Restart%>" onclick="sbCtrl('restart')" />
+    </div>
+
+  </div>
+</div>
+
+<script type="text/javascript">
+var actionUrl = '<%=luci.dispatcher.build_url("admin","services","sing-box","action")%>';
+
+function sbSetStatus(running) {
+  var el = document.getElementById('sb-status');
+  if (running) {
+    el.style.color = '#2ecc40';
+    el.innerText   = '<%:Running%>';
+  } else {
+    el.style.color = '#e74c3c';
+    el.innerText   = '<%:Stopped%>';
+  }
+}
+
+function sbCtrl(action) {
+  XHR.get(actionUrl, { action: action }, function(x, data) {
+    if (data) sbSetStatus(data.running);
+  });
+}
+
+XHR.poll(3, actionUrl, { action: 'status' }, function(x, data) {
+  if (data) sbSetStatus(data.running);
+});
+</script>
+
+<%+footer%>

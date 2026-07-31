@@ -17,6 +17,7 @@ import (
 
 	"github.com/K-Lrize/openwrt-build/internal/config"
 	"github.com/K-Lrize/openwrt-build/internal/diag"
+	"github.com/K-Lrize/openwrt-build/internal/feed"
 	"github.com/K-Lrize/openwrt-build/internal/resolve"
 )
 
@@ -39,7 +40,7 @@ func commands() []command {
 	return []command{
 		{
 			name:    "lint",
-			summary: "校验全部配置",
+			summary: "校验全部配置与自有软件包 Makefile",
 			usage:   "wrt lint",
 			run:     runLint,
 		},
@@ -156,6 +157,12 @@ func runLint(c ctx, args []string) error {
 			problems = append(problems, more...)
 		}
 	}
+
+	_, feedProblems, err := feed.Load(c.root)
+	if err != nil {
+		return err
+	}
+	problems = append(problems, feedProblems...)
 
 	for _, p := range problems {
 		fmt.Fprintln(c.stdout, p)

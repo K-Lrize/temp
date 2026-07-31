@@ -75,6 +75,21 @@ func TestLintPassesWithWarningsOnly(t *testing.T) {
 	}
 }
 
+func TestLintCoversFeedMakefiles(t *testing.T) {
+	// 配置全绿但自有包的 Makefile 有问题时，lint 同样要拦——feed 里的错
+	// （版本号不合 apk 语法、PROVIDES 缺配套）一样是刷机之后才暴露的那类。
+	root := t.TempDir()
+	write(t, root, "feed/demo/Makefile", "PKG_NAME:=demo\nPKG_VERSION:=1.2.3-alpha.4\n$(eval $(call BuildPackage,demo))\n")
+
+	stdout, _, err := runCLI(t, "-C", root, "lint")
+	if err == nil {
+		t.Fatal("feed 有错时 lint 必须返回非零")
+	}
+	if !strings.Contains(stdout, "feed.pkg-version") {
+		t.Errorf("输出里缺少 feed 规则：\n%s", stdout)
+	}
+}
+
 func TestResolveAllEmitsJSONArray(t *testing.T) {
 	stdout, _, err := runCLI(t, atRepo(t, "resolve", "--all")...)
 	if err != nil {

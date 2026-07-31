@@ -301,9 +301,12 @@ cmd/wrt/main.go              ✓
 internal/
 ├── config/      types.go = schema = 唯一校验点；load.go；validate.go；packages.go  ✓
 ├── resolve/     device × line → Variant                                            ✓
-├── repos/       三层 URL 装配（纯函数）
-├── plan/        指纹计算 + 远端比对 → 三矩阵
-├── artifacts/   R2 路径规则 + build/current/manifest/latest 类型
+├── repos/       三层 URL 装配（纯函数）                                              ✓
+├── files/       rootfs overlay 组装 + 构建期钩子                                     ✓
+├── plan/        指纹计算 + 远端比对 → 三矩阵                                          ✓
+├── artifacts/   R2 路径规则 + build/current/manifest/latest 类型（只有类型，无 I/O）  ✓
+├── diag/        全仓库共用的诊断类型                                                  ✓
+├── feed/        自有包 Makefile 校验                                                  ✓
 ├── publish/     S3 客户端（aws-sdk-go-v2 打 R2 端点），封装发布顺序
 ├── gc/          引用计数 + 熔断
 ├── source/      src prepare/export
@@ -325,9 +328,9 @@ golden 基线按 Go 惯例放在产出它的包旁边（`internal/resolve/testda
 ```
 wrt lint                                   全部配置校验（结构 + 语义 + 跨层包冲突；feed Makefile 规则待补）  ✓
 wrt resolve <variant>|--all                打印 Variant JSON                                                  ✓
-wrt plan [--repo-base URL] [--force]       三矩阵 + release_id
-wrt repos <variant> --vermagic X --repo-base Y [--local-l1 PATH]
-wrt files <variant> <dest>                 组装 files overlay（复制 + 跑构建期脚本）
+wrt plan [--repo-base URL] [--all]         三矩阵                                            ✓
+wrt repos <variant> --vermagic X --repo-base Y [--local-l1 PATH]                             ✓
+wrt files <variant> <dest>                 组装 files overlay（合并文件层 + 跑构建期钩子）  ✓
 wrt src prepare --line X --target t/s      clone@commit → overlay → quilt → .config → 符号存活校验
 wrt src export --line X                    内核改动写回 lines/<id>/overlay/
 wrt meta build|current|manifest|latest     生成元数据 JSON
@@ -349,7 +352,7 @@ wrt schema export                          导出 JSON Schema
 
 ```
 release.yml  (push main / workflow_dispatch)
-├── plan       go build wrt → 上传 artifact；wrt plan → 三矩阵 + release_id
+├── plan       go build wrt → 上传 artifact；wrt plan → 三矩阵；统一算一次 release_id（M2）
 ├── toolchain  needs: plan          按 (line, target, subtarget)，仅 artifacts:self
 ├── packages   needs: [plan,toolchain]  按 (line, arch)
 ├── firmware   needs: [plan,packages]   按 variant
@@ -498,7 +501,7 @@ APK 版本号规则（旧仓库 `docs/reference/apk-versioning.md` 的沉淀）*
 | 阶段 | 内容 | 出口标准 |
 | --- | --- | --- |
 | **M0** ✓ | 仓库骨架；`config` 类型 + `Validate()`；`wrt lint` / `resolve`；sets 拆分 | ✓ 对同一份配置，`wrt resolve` 与旧仓库 `expected/resolved.json` 语义等价（`TestMigrationPreservesPackageSets` 逐包核对 124 项） |
-| **M1** | `repos` / `files` / `plan` + 纯函数单测 | `wrt plan` 在无变更时输出三个空矩阵（幂等性证明） |
+| **M1** ✓ | `repos` / `files` / `plan` + 纯函数单测 | ✓ 判定逻辑已就位并有离线测试覆盖；「无变更时三个矩阵为空」要等 M2 真的往 R2 发布之后才能端到端验证 |
 | **M2** | `artifacts` / `publish` / `meta`；`release.yml` + `_firmware.yml`；先跑通 `artifacts: official` 的 vm-armsr | 一次 push 产出一份可刷的固件，落到新 R2 布局 |
 | **M3** | `_toolchain.yml` + `wrt src prepare/export`；跑通 `artifacts: self` | **自建 SDK/IB 落地**；`25.12-selfbuild` line 产出可用的 SDK/IB/kmod/base |
 | **M4** | `gc` + `verify` + qemu 冒烟 + PR 门禁 `ci.yml` | qemu 里 `apk update` 无 UNTRUSTED |

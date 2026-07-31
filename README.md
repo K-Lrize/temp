@@ -37,6 +37,15 @@ go run ./cmd/wrt help            # 自文档入口
 go run ./cmd/wrt lint            # 校验全部配置
 go run ./cmd/wrt resolve --all   # 展开全部 variant
 go run ./cmd/wrt resolve mt3600be@25.12
+
+# 这次改动到底要不要重新构建
+go run ./cmd/wrt plan [--repo-base https://repo.example.com] [--all]
+
+# 三层软件源地址（构建期 / 运行期两份）
+go run ./cmd/wrt repos mt3600be@25.12 --repo-base https://repo.example.com --vermagic 6.12.94-1-...
+
+# 组装 rootfs overlay
+go run ./cmd/wrt files mt3600be@25.12 /tmp/overlay
 ```
 
 装成命令：`go install ./cmd/wrt`

@@ -34,23 +34,23 @@ func (l Line) Validate() Problems {
 	var ps Problems
 
 	if !reIdent.MatchString(l.ID) {
-		ps = ps.errorf("line.id", "id %q 非法：只允许小写字母、数字、点、连字符、下划线，且首字符为字母或数字", l.ID)
+		ps = ps.Errorf("line.id", "id %q 非法：只允许小写字母、数字、点、连字符、下划线，且首字符为字母或数字", l.ID)
 	}
 	if !reUpstream.MatchString(l.Upstream) {
-		ps = ps.errorf("line.upstream", "upstream %q 必须是完整 patch 号（如 25.12.5），不接受 25.12 这类让系统猜测的写法", l.Upstream)
+		ps = ps.Errorf("line.upstream", "upstream %q 必须是完整 patch 号（如 25.12.5），不接受 25.12 这类让系统猜测的写法", l.Upstream)
 	}
 
 	switch l.Artifacts {
 	case ArtifactsOfficial:
 		if l.Source != nil {
-			ps = ps.errorf("line.source.unexpected", "artifacts=official 的 line 不该声明 source：产物直接借官方，源码字段不参与任何决策，留着只会误导")
+			ps = ps.Errorf("line.source.unexpected", "artifacts=official 的 line 不该声明 source：产物直接借官方，源码字段不参与任何决策，留着只会误导")
 		}
 	case ArtifactsSelf:
 		if l.Source == nil {
-			ps = ps.errorf("line.source.missing", "artifacts=self 必须声明 source（repo/commit/ref）")
+			ps = ps.Errorf("line.source.missing", "artifacts=self 必须声明 source（repo/commit/ref）")
 		}
 	default:
-		ps = ps.errorf("line.artifacts", "artifacts %q 非法：只能是 %q 或 %q", l.Artifacts, ArtifactsOfficial, ArtifactsSelf)
+		ps = ps.Errorf("line.artifacts", "artifacts %q 非法：只能是 %q 或 %q", l.Artifacts, ArtifactsOfficial, ArtifactsSelf)
 	}
 
 	if l.Source != nil {
@@ -64,10 +64,10 @@ func (l Line) validateSource() Problems {
 	src := l.Source
 
 	if !strings.HasPrefix(src.Repo, "http://") && !strings.HasPrefix(src.Repo, "https://") {
-		ps = ps.errorf("line.source.repo", "source.repo %q 必须是 http(s) URL——CI 里没有 ssh 凭据", src.Repo)
+		ps = ps.Errorf("line.source.repo", "source.repo %q 必须是 http(s) URL——CI 里没有 ssh 凭据", src.Repo)
 	}
 	if !reCommit.MatchString(src.Commit) {
-		ps = ps.errorf("line.source.commit",
+		ps = ps.Errorf("line.source.commit",
 			"source.commit %q 必须是 40 位完整哈希；用 `git ls-remote --tags <repo> '<tag>*'` 取值，"+
 				"带注解的 tag 要取 ^{} 剥离后的提交对象", src.Commit)
 	}
@@ -76,18 +76,18 @@ func (l Line) validateSource() Problems {
 	// 否则借来的 luci/packages 与自编 libc 对不上。commit 无法离线核对，
 	// 只能用 ref 做这道检查——这是 ref 唯一的机器用途。
 	if src.Ref == "" {
-		ps = ps.errorf("line.source.ref", "artifacts=self 时 source.ref 必填：它是离线核对「upstream 与源码是否同一条版本线」的唯一依据")
+		ps = ps.Errorf("line.source.ref", "artifacts=self 时 source.ref 必填：它是离线核对「upstream 与源码是否同一条版本线」的唯一依据")
 		return ps
 	}
 	refLine := versionLine(src.Ref)
 	if refLine == "" {
-		ps = ps.warnf("line.upstream-ref-unknown",
+		ps = ps.Warnf("line.upstream-ref-unknown",
 			"source.ref %q 里没有版本号，无法核对它与 upstream %s 是否同一条版本线；"+
 				"跟踪 master 是合法的，但要自己确认借来的 L3 社区包与自编 libc 兼容", src.Ref, l.Upstream)
 		return ps
 	}
 	if up := versionLine(l.Upstream); up != "" && up != refLine {
-		ps = ps.errorf("line.upstream-ref-mismatch",
+		ps = ps.Errorf("line.upstream-ref-mismatch",
 			"upstream %s（%s 线）与 source.ref %s（%s 线）不是同一条版本线："+
 				"L3 社区 feed 借 upstream，自编 libc 来自 source，两者错线会在设备上表现为依赖装不上",
 			l.Upstream, up, src.Ref, refLine)
@@ -110,7 +110,7 @@ func (d Device) Validate() Problems {
 	var ps Problems
 
 	if !reIdent.MatchString(d.Name) {
-		ps = ps.errorf("device.name", "name %q 非法：只允许小写字母、数字、点、连字符、下划线", d.Name)
+		ps = ps.Errorf("device.name", "name %q 非法：只允许小写字母、数字、点、连字符、下划线", d.Name)
 	}
 
 	// 用有序切片而不是 map：map 迭代顺序随机，会让 lint 的输出在两次运行之间
@@ -122,22 +122,22 @@ func (d Device) Validate() Problems {
 		{"arch", d.Hardware.Arch},
 	} {
 		if f.value == "" {
-			ps = ps.errorf("device.hardware", "hardware.%s 必填", f.name)
+			ps = ps.Errorf("device.hardware", "hardware.%s 必填", f.name)
 		}
 	}
 	ps = append(ps, d.Hardware.validateArch()...)
 
 	switch {
 	case len(d.Lines) == 0:
-		ps = ps.errorf("device.lines", "lines 至少要有一条：它是这台设备的出货矩阵，空列表意味着永远不会被构建")
+		ps = ps.Errorf("device.lines", "lines 至少要有一条：它是这台设备的出货矩阵，空列表意味着永远不会被构建")
 	default:
 		if dup := firstDuplicate(d.Lines); dup != "" {
-			ps = ps.errorf("device.lines", "lines 里 %q 重复", dup)
+			ps = ps.Errorf("device.lines", "lines 里 %q 重复", dup)
 		}
 	}
 
 	if d.Image.RootfsPartsize < 0 {
-		ps = ps.errorf("device.image", "image.rootfs_partsize 不能为负（当前 %d）", d.Image.RootfsPartsize)
+		ps = ps.Errorf("device.image", "image.rootfs_partsize 不能为负（当前 %d）", d.Image.RootfsPartsize)
 	}
 
 	ps = append(ps, validatePackages(d.Packages.Add, d.Packages.Remove)...)
@@ -153,10 +153,10 @@ func (h Hardware) validateArch() Problems {
 	key := h.TargetKey()
 	want, known := archByTarget[key]
 	if !known {
-		return ps.warnf("device.arch", "target 组合 %q 尚未收录，无法核对 arch=%q；接入后请把实测值加进 archByTarget", key, h.Arch)
+		return ps.Warnf("device.arch", "target 组合 %q 尚未收录，无法核对 arch=%q；接入后请把实测值加进 archByTarget", key, h.Arch)
 	}
 	if h.Arch != want {
-		ps = ps.errorf("device.arch", "target 组合 %q 的 arch 应为 %q，当前为 %q", key, want, h.Arch)
+		ps = ps.Errorf("device.arch", "target 组合 %q 的 arch 应为 %q，当前为 %q", key, want, h.Arch)
 	}
 	return ps
 }
@@ -165,10 +165,10 @@ func (h Hardware) validateArch() Problems {
 func (s Set) Validate() Problems {
 	var ps Problems
 	if !reIdent.MatchString(s.Name) {
-		ps = ps.errorf("set.name", "name %q 非法：只允许小写字母、数字、点、连字符、下划线", s.Name)
+		ps = ps.Errorf("set.name", "name %q 非法：只允许小写字母、数字、点、连字符、下划线", s.Name)
 	}
 	if len(s.Add) == 0 && len(s.Remove) == 0 {
-		ps = ps.errorf("set.empty", "包集 %q 的 add 与 remove 都为空，没有任何作用", s.Name)
+		ps = ps.Errorf("set.empty", "包集 %q 的 add 与 remove 都为空，没有任何作用", s.Name)
 	}
 	ps = append(ps, validatePackages(s.Add, s.Remove)...)
 	return ps
@@ -190,7 +190,7 @@ func validatePackages(add, remove []string) Problems {
 			if strings.HasPrefix(name, "-") {
 				hint = "；remove 列表里直接写包名即可，`-` 前缀是 ImageBuilder 的 PACKAGES 语法，由本工具在最后拼上"
 			}
-			ps = ps.errorf("packages.name", "包名 %q 非法%s", name, hint)
+			ps = ps.Errorf("packages.name", "包名 %q 非法%s", name, hint)
 		}
 	}
 
@@ -200,7 +200,7 @@ func validatePackages(add, remove []string) Problems {
 	}
 	for _, name := range add {
 		if inRemove[name] {
-			ps = ps.errorf("packages.conflict", "%q 同时出现在 add 与 remove 里", name)
+			ps = ps.Errorf("packages.conflict", "%q 同时出现在 add 与 remove 里", name)
 		}
 	}
 	return ps

@@ -68,7 +68,7 @@ func MergePackages(layers []Layer) (Packages, Problems) {
 	// 按 Add 的顺序检查冲突，保证报错顺序稳定（map 迭代顺序是随机的）。
 	for _, name := range result.Add {
 		if remover, conflict := removedBy[name]; conflict {
-			ps = ps.errorf("packages.conflict",
+			ps = ps.Errorf("packages.conflict",
 				"%q 被 %s 装上又被 %s 卸掉：合并不做「后面的层覆盖前面的」，"+
 					"请改掉其中一层，或者这台设备不要 include 那个包集",
 				name, addedBy[name], remover)

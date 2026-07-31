@@ -48,11 +48,11 @@ func (p Problem) String() string {
 // 配置类错误往往成批出现，一次只报一条会让人来回跑五遍 lint。
 type Problems []Problem
 
-func (ps Problems) errorf(rule, format string, args ...any) Problems {
+func (ps Problems) Errorf(rule, format string, args ...any) Problems {
 	return append(ps, Problem{Rule: rule, Message: fmt.Sprintf(format, args...), Severity: SeverityError})
 }
 
-func (ps Problems) warnf(rule, format string, args ...any) Problems {
+func (ps Problems) Warnf(rule, format string, args ...any) Problems {
 	return append(ps, Problem{Rule: rule, Message: fmt.Sprintf(format, args...), Severity: SeverityWarn})
 }
 

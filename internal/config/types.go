@@ -25,13 +25,13 @@ const (
 
 // Source 指向一棵 OpenWrt 源码树。
 type Source struct {
-	Repo string `yaml:"repo"`
+	Repo string `yaml:"repo" json:"repo"`
 	// Commit 是唯一权威。tag 理论上不可变，但只信 commit 才能保证
 	// 「这次构建到底编了哪个源码状态」是可回答、可复现的。
-	Commit string `yaml:"commit"`
+	Commit string `yaml:"commit" json:"commit"`
 	// Ref 供人读，CI 不用它检出。唯一的机器用途是核对 upstream 与源码
 	// 是否属于同一条版本线（见 Line.Validate）。
-	Ref string `yaml:"ref,omitempty"`
+	Ref string `yaml:"ref,omitempty" json:"ref,omitempty"`
 }
 
 // Line 是一条源码基线 + 由它产出的产物身份。
@@ -59,10 +59,10 @@ type Line struct {
 
 // Hardware 是一台设备的构建坐标。
 type Hardware struct {
-	Target    string `yaml:"target"`
-	Subtarget string `yaml:"subtarget"`
-	Profile   string `yaml:"profile"`
-	Arch      string `yaml:"arch"`
+	Target    string `yaml:"target" json:"target"`
+	Subtarget string `yaml:"subtarget" json:"subtarget"`
+	Profile   string `yaml:"profile" json:"profile"`
+	Arch      string `yaml:"arch" json:"arch"`
 }
 
 // TargetKey 是 target/subtarget 组合，同时也是 R2 上 targets/ 下的路径片段。
@@ -78,7 +78,7 @@ type PackageSpec struct {
 }
 
 type Image struct {
-	RootfsPartsize int `yaml:"rootfs_partsize,omitempty"`
+	RootfsPartsize int `yaml:"rootfs_partsize,omitempty" json:"rootfs_partsize"`
 }
 
 // Device 只描述硬件事实与装什么包，一个源码字段都没有。

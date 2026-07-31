@@ -106,7 +106,7 @@ func (c *Config) loadLines() (Problems, error) {
 
 		var one Problems
 		if line.ID != id {
-			one = one.errorf("line.id-path", "line.id %q 与目录名 %q 不符：目录名同时是 R2 命名空间前缀，两者必须一致", line.ID, id)
+			one = one.Errorf("line.id-path", "line.id %q 与目录名 %q 不符：目录名同时是 R2 命名空间前缀，两者必须一致", line.ID, id)
 		}
 		one = append(one, line.Validate()...)
 		ps = append(ps, one.WithSource(rel)...)
@@ -136,7 +136,7 @@ func (c *Config) loadSets() (Problems, error) {
 		}
 		var one Problems
 		if set.Name != id {
-			one = one.errorf("set.name-path", "set.name %q 与文件名 %q 不符", set.Name, name)
+			one = one.Errorf("set.name-path", "set.name %q 与文件名 %q 不符", set.Name, name)
 		}
 		one = append(one, set.Validate()...)
 		ps = append(ps, one.WithSource(rel)...)
@@ -160,7 +160,7 @@ func (c *Config) loadDevices() (Problems, error) {
 		}
 		var one Problems
 		if device.Name != name {
-			one = one.errorf("device.name-path", "device.name %q 与目录名 %q 不符", device.Name, name)
+			one = one.Errorf("device.name-path", "device.name %q 与目录名 %q 不符", device.Name, name)
 		}
 		one = append(one, device.Validate()...)
 		ps = append(ps, one.WithSource(rel)...)
@@ -182,7 +182,7 @@ func (c *Config) validateCrossFile() Problems {
 		// 这份配置永远编不出你想要的结果，而且不会有任何运行期迹象。
 		if line.RequiresBuild && line.Artifacts == ArtifactsOfficial {
 			var one Problems
-			one = one.errorf("line.requires-build",
+			one = one.Errorf("line.requires-build",
 				"line %s 目录下有 %s 之一（源码相对官方有实质修改），却声明 artifacts=%s："+
 					"官方发布产物里不会包含你的改动",
 				id, strings.Join(sourceDirs, "/"), ArtifactsOfficial)
@@ -200,14 +200,14 @@ func (c *Config) validateCrossFile() Problems {
 				usedLines[lineID] = true
 				continue
 			}
-			one = one.errorf("device.lines-ref", "引用的 line %q 不存在（应为 %s/%s/%s）", lineID, dirLines, lineID, fileLine)
+			one = one.Errorf("device.lines-ref", "引用的 line %q 不存在（应为 %s/%s/%s）", lineID, dirLines, lineID, fileLine)
 		}
 		for _, setName := range device.Packages.Include {
 			if _, ok := c.Sets[setName]; ok {
 				usedSets[setName] = true
 				continue
 			}
-			one = one.errorf("device.include-ref", "include 的包集 %q 不存在（应为 %s/%s.yaml）", setName, dirSets, setName)
+			one = one.Errorf("device.include-ref", "include 的包集 %q 不存在（应为 %s/%s.yaml）", setName, dirSets, setName)
 		}
 		ps = append(ps, one.WithSource(rel)...)
 	}
@@ -219,7 +219,7 @@ func (c *Config) validateCrossFile() Problems {
 			continue
 		}
 		var one Problems
-		one = one.warnf("line.unreferenced", "line %s 没有被任何设备引用", id)
+		one = one.Warnf("line.unreferenced", "line %s 没有被任何设备引用", id)
 		ps = append(ps, one.WithSource(path.Join(dirLines, id, fileLine))...)
 	}
 	for _, name := range c.SortedSetNames() {
@@ -227,7 +227,7 @@ func (c *Config) validateCrossFile() Problems {
 			continue
 		}
 		var one Problems
-		one = one.warnf("set.unreferenced", "包集 %s 没有被任何设备 include", name)
+		one = one.Warnf("set.unreferenced", "包集 %s 没有被任何设备 include", name)
 		ps = append(ps, one.WithSource(path.Join(dirSets, name+".yaml"))...)
 	}
 
@@ -242,7 +242,7 @@ func decodeFile(fullPath string, out any) Problems {
 	f, err := os.Open(fullPath)
 	if err != nil {
 		var one Problems
-		return one.errorf("yaml", "打开失败：%v", err)
+		return one.Errorf("yaml", "打开失败：%v", err)
 	}
 	defer f.Close()
 
@@ -250,7 +250,7 @@ func decodeFile(fullPath string, out any) Problems {
 	dec.KnownFields(true)
 	if err := dec.Decode(out); err != nil {
 		var one Problems
-		return one.errorf("yaml", "解析失败：%v", err)
+		return one.Errorf("yaml", "解析失败：%v", err)
 	}
 	return nil
 }

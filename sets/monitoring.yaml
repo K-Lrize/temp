@@ -1,0 +1,8 @@
+# 流量统计与指标导出。
+name: monitoring
+description: 分设备流量统计与 Prometheus 指标导出
+add:
+  - nlbwmon
+  - luci-app-nlbwmon
+  - luci-i18n-nlbwmon-zh-cn
+  - prometheus-node-exporter-lua

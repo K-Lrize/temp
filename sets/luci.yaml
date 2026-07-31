@@ -1,0 +1,19 @@
+# LuCI 主体 + 与之一一对应的中文语言包。
+#
+# 语言包刻意不单独成集：luci-i18n-<app>-zh-cn 依赖 luci-app-<app>，
+# 单独一个「中文集」会把它引用的每个 app 都当依赖装回来，等于绕过了
+# 包集的取舍。规矩是：i18n 包永远与它翻译的那个 app 待在同一个集里。
+name: luci
+description: LuCI 主体、默认主题与核心页面的中文语言包
+add:
+  - luci
+  - luci-base
+  - luci-ssl
+  - luci-mod-admin-full
+  - luci-app-firewall
+  - luci-app-uhttpd
+  - luci-theme-bootstrap
+  - luci-i18n-base-zh-cn
+  - luci-i18n-firewall-zh-cn
+  - luci-i18n-uhttpd-zh-cn
+  - luci-i18n-package-manager-zh-cn

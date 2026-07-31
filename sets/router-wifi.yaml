@@ -1,0 +1,12 @@
+# 无线认证守护进程。wpad 家族互斥，选定 openssl 变体就要把其余全排掉，
+# 否则 apk 会在解依赖时随机挑一个。
+name: router-wifi
+description: 无线认证（wpad-openssl 变体）
+add:
+  - wpad-openssl
+remove:
+  - wpad-basic
+  - wpad-basic-mbedtls
+  - wpad-basic-wolfssl
+  - wpad-mbedtls
+  - wpad-wolfssl

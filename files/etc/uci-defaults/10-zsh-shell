@@ -1,0 +1,8 @@
+#!/bin/sh
+
+# 将 root 的默认登录 shell 从 ash 切换到 zsh
+if [ -x /usr/bin/zsh ]; then
+    sed -i '/^root:/s|:/bin/ash$|:/usr/bin/zsh|' /etc/passwd
+fi
+
+exit 0

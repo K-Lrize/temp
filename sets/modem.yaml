@@ -1,0 +1,18 @@
+# USB 4G/5G 模块与手机 USB 共享网络（含 iPhone 的 ipheth）。
+name: modem
+description: USB 蜂窝模块与手机 USB 网络共享
+add:
+  - kmod-usb-net
+  - kmod-usb-net-rndis
+  - kmod-usb-net-cdc-ncm
+  - kmod-usb-net-cdc-ether
+  - kmod-usb-net-ipheth
+  - kmod-usb-net-qmi-wwan
+  - kmod-usb-net-cdc-mbim
+  - kmod-usb-serial-option
+  - modemmanager
+  - luci-proto-modemmanager
+  - usb-modeswitch
+  - libqmi
+  - libmbim
+  - libimobiledevice

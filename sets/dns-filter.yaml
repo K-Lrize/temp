@@ -1,0 +1,10 @@
+# 上游 DNS 分流与 IP 黑名单。
+name: dns-filter
+description: SmartDNS 分流与 banIP 黑名单
+add:
+  - smartdns
+  - luci-app-smartdns
+  - luci-i18n-smartdns-zh-cn
+  - banip
+  - luci-app-banip
+  - luci-i18n-banip-zh-cn

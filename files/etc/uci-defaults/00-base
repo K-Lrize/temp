@@ -1,0 +1,12 @@
+#!/bin/sh
+
+# 时区设置
+uci set system.@system[0].timezone="CST-8"
+uci set system.@system[0].zonename="Asia/Shanghai"
+uci commit system
+
+# SSH 默认仅允许 LAN 侧访问
+uci set dropbear.@dropbear[0].Interface="lan"
+uci commit dropbear
+
+exit 0

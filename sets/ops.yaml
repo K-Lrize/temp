@@ -1,0 +1,25 @@
+# 长期跑着不用管的运维件：证书续期、动态域名、看门狗、定时开关 Wi-Fi、
+# 网络唤醒、UPnP、日志轮转。
+name: ops
+description: 证书续期、DDNS、看门狗、定时任务、WoL、UPnP、日志轮转
+add:
+  - acme-common
+  - acme-acmesh
+  - acme-acmesh-dnsapi
+  - luci-app-acme
+  - luci-i18n-acme-zh-cn
+  - watchcat
+  - luci-app-watchcat
+  - luci-i18n-watchcat-zh-cn
+  - ddns-scripts
+  - luci-app-ddns
+  - luci-i18n-ddns-zh-cn
+  - wifischedule
+  - luci-app-wifischedule
+  - luci-i18n-wifischedule-zh-cn
+  - luci-app-wol
+  - luci-i18n-wol-zh-cn
+  - etherwake
+  - luci-app-upnp
+  - luci-i18n-upnp-zh-cn
+  - logrotate

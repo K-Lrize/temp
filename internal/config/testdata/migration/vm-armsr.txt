@@ -1,0 +1,11 @@
+curl
+htop
+iperf3
+jq
+luci
+openssh-keygen
+openssh-server
+qemu-ga
+rsync
+tcpdump
+wget-ssl

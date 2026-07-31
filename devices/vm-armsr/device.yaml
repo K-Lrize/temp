@@ -1,0 +1,29 @@
+# armsr/armv8 通用 ARM64 虚拟机（Apple Silicon HVF / KVM 等）
+#
+# 这台设备同时出两条线的固件：官方线用于日常验证，自编线用于验证自建
+# 工具链链路。上一代要为此复制出 vm-armsr 与 vm-armsr-build 两个内容
+# 逐字相同、只差一行 channel 的目录——lines 是列表就消掉了那次复制。
+
+name: vm-armsr
+
+hardware:
+  target: armsr
+  subtarget: armv8
+  profile: generic
+  arch: aarch64_generic
+
+lines:
+  - "25.12"
+  - 25.12-selfbuild
+
+packages:
+  include:
+    - common
+  add:
+    - luci
+    - qemu-ga
+    - openssh-server
+    - openssh-keygen
+
+image:
+  rootfs_partsize: 256

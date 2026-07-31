@@ -1,0 +1,22 @@
+# 官方源码自编线：源码与官方 25.12.5 逐字节相同，但 SDK/IB/kmod/base 全部
+# 自己编译产出。这不矛盾——「源码改没改」与「产物从哪来」是正交的两件事：
+# 自编产物与官方产物不可互换（vermagic 与编译选项都不同），所以它必须是
+# 一条独立的 line。
+#
+# 当前用途：验证自建链路本身。真要打补丁时另开 25.12-<name>，
+# 不预留空 line。
+id: 25.12-selfbuild
+description: 官方 v25.12.5 源码自编，用于验证自建工具链链路
+
+# L3 社区 feed 仍借官方同版本线，必须与 source 属于同一条版本线，
+# 否则借来的 luci/packages 与自编 libc 对不上。
+upstream: 25.12.5
+artifacts: self
+
+source:
+  repo: https://github.com/openwrt/openwrt
+  # ref 供人读，同时是离线核对「upstream 与源码同线」的唯一依据。
+  ref: v25.12.5
+  # git ls-remote --tags https://github.com/openwrt/openwrt.git 'v25.12.5*'
+  # v25.12.5 是带注解的 tag，下面是 ^{} 剥离后的提交对象。
+  commit: f0a60eee2fe051741c643ea6118718aae1ef17fb

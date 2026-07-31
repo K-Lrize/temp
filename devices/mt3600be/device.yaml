@@ -1,0 +1,40 @@
+# GL.iNet GL-MT3600BE
+#
+# 只描述硬件事实与装什么包，一个源码字段都没有——切换/新增版本线是改
+# lines 这一处。
+
+name: mt3600be
+
+hardware:
+  target: mediatek
+  subtarget: filogic
+  profile: glinet_gl-mt3600be
+  arch: aarch64_cortex-a53
+
+metadata:
+  # 市场材料写 MT7988 是错的，实测是 MT7987a
+  soc: MT7987a
+  wifi: MT7990
+
+lines:
+  - "25.12"
+
+packages:
+  include:
+    - common
+    - luci
+    - router-net
+    - router-wifi
+    - router-qos
+    - usb-storage
+    - modem
+    - dns-filter
+    - ops
+    - monitoring
+    - dev-tools
+  add:
+    # 自有 feed 里的包，不属于任何通用包集
+    - sing-box
+
+image:
+  rootfs_partsize: 256

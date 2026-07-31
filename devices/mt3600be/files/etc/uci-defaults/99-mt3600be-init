@@ -1,0 +1,95 @@
+#!/bin/sh
+
+# ── 系统 ──────────────────────────────────────────────────────────
+uci set system.@system[0].hostname='MT3600BE'
+uci set system.@system[0].zonename='Asia/Shanghai'
+uci set system.@system[0].timezone='CST-8'
+uci set system.@system[0].zram_size_mb='256'
+uci set system.@system[0].zram_comp_algo='zstd'
+
+uci -q get system.ntp >/dev/null || uci set system.ntp='timeserver'
+uci set system.ntp.enabled='1'
+uci set system.ntp.enable_server='0'
+uci -q delete system.ntp.server
+uci add_list system.ntp.server='ntp.aliyun.com'
+uci add_list system.ntp.server='cn.pool.ntp.org'
+uci add_list system.ntp.server='time.cloudflare.com'
+uci commit system
+
+# ── LAN ───────────────────────────────────────────────────────────
+uci set network.lan.ipaddr='10.0.0.1/24'
+
+# ── 访客网络 ──────────────────────────────────────────────────────
+uci add network device >/dev/null
+uci set network.@device[-1].name='br-guest'
+uci set network.@device[-1].type='bridge'
+uci set network.guest=interface
+uci set network.guest.device='br-guest'
+uci set network.guest.proto='static'
+uci set network.guest.ipaddr='10.0.1.1'
+uci set network.guest.netmask='255.255.255.0'
+uci commit network
+
+uci set dhcp.guest=dhcp
+uci set dhcp.guest.interface='guest'
+uci set dhcp.guest.start='100'
+uci set dhcp.guest.limit='150'
+uci set dhcp.guest.leasetime='12h'
+uci add_list dhcp.guest.dhcp_option='6,223.5.5.5,223.6.6.6'
+uci commit dhcp
+
+# ── 防火墙：访客区域 + 仅放行 DHCP/DNS ────────────────────────────
+uci set firewall.guest=zone
+uci set firewall.guest.name='guest'
+uci set firewall.guest.network='guest'
+uci set firewall.guest.input='REJECT'
+uci set firewall.guest.output='ACCEPT'
+uci set firewall.guest.forward='REJECT'
+
+uci set firewall.guest_wan=forwarding
+uci set firewall.guest_wan.src='guest'
+uci set firewall.guest_wan.dest='wan'
+
+uci set firewall.guest_dhcp=rule
+uci set firewall.guest_dhcp.name='Allow-Guest-DHCP'
+uci set firewall.guest_dhcp.src='guest'
+uci set firewall.guest_dhcp.dest_port='67-68'
+uci set firewall.guest_dhcp.proto='udp'
+uci set firewall.guest_dhcp.target='ACCEPT'
+
+uci set firewall.guest_dns=rule
+uci set firewall.guest_dns.name='Allow-Guest-DNS'
+uci set firewall.guest_dns.src='guest'
+uci set firewall.guest_dns.dest_port='53'
+uci set firewall.guest_dns.proto='tcp udp'
+uci set firewall.guest_dns.target='ACCEPT'
+uci commit firewall
+
+# ── Wi-Fi：CN 区码 + 双频默认 SSID + 访客 SSID（默认禁用）─────────
+uci set wireless.radio0.country='CN'
+uci set wireless.radio1.country='CN'
+
+uci set wireless.default_radio0.disabled='1'
+uci set wireless.default_radio0.ifname='wlan0'
+uci set wireless.default_radio0.ssid='GL-MT3600BE-2.4G'
+
+uci set wireless.default_radio1.device='radio1'
+uci set wireless.default_radio1.ifname='wlan1'
+uci set wireless.default_radio1.ssid='GL-MT3600BE-5G'
+uci set wireless.default_radio1.encryption='sae'
+uci set wireless.default_radio1.key='ChangeMe!'
+uci set wireless.default_radio1.disabled='0'
+
+uci set wireless.guest_radio1=wifi-iface
+uci set wireless.guest_radio1.device='radio1'
+uci set wireless.guest_radio1.ifname='wlan1-guest'
+uci set wireless.guest_radio1.network='guest'
+uci set wireless.guest_radio1.mode='ap'
+uci set wireless.guest_radio1.ssid='GL-MT3600BE-Guest'
+uci set wireless.guest_radio1.encryption='sae-mixed'
+uci set wireless.guest_radio1.key='ChangeMe!'
+uci set wireless.guest_radio1.isolate='1'
+uci set wireless.guest_radio1.disabled='1'
+uci commit wireless
+
+exit 0

@@ -1,0 +1,11 @@
+# 每台设备（含虚拟机）都装的排障工具。
+name: common
+description: 所有设备共用的基础排障工具
+add:
+  - curl
+  - wget-ssl
+  - rsync
+  - jq
+  - tcpdump
+  - iperf3
+  - htop

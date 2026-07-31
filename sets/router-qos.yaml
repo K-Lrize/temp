@@ -1,0 +1,14 @@
+# 队列管理与拥塞控制。
+name: router-qos
+description: SQM/CAKE 队列管理、BBR 拥塞控制、中断均衡
+add:
+  - kmod-tcp-bbr
+  - kmod-sched
+  - kmod-sched-core
+  - kmod-sched-cake
+  - kmod-ifb
+  - sqm-scripts
+  - luci-app-sqm
+  - luci-i18n-sqm-zh-cn
+  - irqbalance
+  - conntrack

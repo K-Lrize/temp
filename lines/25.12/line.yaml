@@ -1,0 +1,7 @@
+# OpenWrt 25.12 官方线：SDK/IB、kmod、target base 包全部借官方发布产物，
+# 源码零改动。目录名即 R2 命名空间前缀，与 id 一致。
+id: "25.12"
+description: OpenWrt 25.12 官方稳定线，直接使用官方预编译产物
+
+upstream: 25.12.5
+artifacts: official

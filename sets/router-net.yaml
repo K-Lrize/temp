@@ -1,0 +1,32 @@
+# 实体路由器的网络底座：完整版 dnsmasq、IPv6 下发、nftables 转发路径、
+# PPPoE 拨号、WireGuard。
+name: router-net
+description: 路由基础网络：DHCP/DNS、IPv6、nftables 转发、PPPoE、WireGuard
+add:
+  - ip-full
+  - nftables-json
+  - ca-bundle
+  - dnsmasq-full
+  - odhcp6c
+  - odhcpd-ipv6only
+  - wireguard-tools
+  - luci-proto-wireguard
+  - kmod-nft-tproxy
+  - kmod-nft-socket
+  - kmod-nft-nat
+  - kmod-nft-fib
+  - kmod-nf-conntrack
+  - kmod-nf-nat
+  - kmod-nf-flow
+  - kmod-tun
+  - kmod-ip6tables
+  - kmod-nf-reject6
+  - kmod-ip6-tunnel
+  - kmod-ppp
+  - kmod-pppoe
+  - kmod-pppox
+  - ppp
+  - ppp-mod-pppoe
+remove:
+  # dnsmasq-full 与 dnsmasq 互斥，必须显式排掉默认那个
+  - dnsmasq

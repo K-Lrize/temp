@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/K-Lrize/openwrt-build/internal/config"
+	"github.com/K-Lrize/openwrt-build/internal/diag"
 )
 
 // Separator 分隔 variant id 的两段：<device>@<line>。
@@ -62,10 +63,10 @@ func ParseID(id string) (device, line string, err error) {
 //
 // 顺序确定：设备名字典序，同一设备内按 device.yaml 里 lines 的声明顺序
 // （第一条是主线）。CI 矩阵和 golden 基线都靠这个顺序稳定。
-func All(cfg *config.Config) ([]Variant, config.Problems) {
+func All(cfg *config.Config) ([]Variant, diag.Problems) {
 	var (
 		variants []Variant
-		ps       config.Problems
+		ps       diag.Problems
 	)
 	for _, name := range cfg.SortedDeviceNames() {
 		device := cfg.Devices[name]
@@ -112,13 +113,13 @@ func One(cfg *config.Config, id string) (Variant, error) {
 	return v, nil
 }
 
-func build(cfg *config.Config, device config.Device, lineID string) (Variant, config.Problems) {
-	var ps config.Problems
+func build(cfg *config.Config, device config.Device, lineID string) (Variant, diag.Problems) {
+	var ps diag.Problems
 	deviceSource := path.Join("devices", device.Name, "device.yaml")
 
 	line, ok := cfg.Lines[lineID]
 	if !ok {
-		one := config.Problems(nil).Errorf("variant.line-ref", "设备 %s 引用的 line %q 不存在", device.Name, lineID)
+		one := diag.Problems(nil).Errorf("variant.line-ref", "设备 %s 引用的 line %q 不存在", device.Name, lineID)
 		return Variant{}, one.WithSource(deviceSource)
 	}
 

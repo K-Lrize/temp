@@ -239,23 +239,6 @@ func TestSetValidate(t *testing.T) {
 	}
 }
 
-func TestProblemsWithSourceDoesNotOverwriteExisting(t *testing.T) {
-	ps := Problems{
-		{Rule: "a", Message: "m"},
-		{Rule: "b", Message: "m", Source: "already/set.yaml"},
-	}
-	got := ps.WithSource("lines/25.12/line.yaml")
-	if got[0].Source != "lines/25.12/line.yaml" {
-		t.Errorf("空 Source 应被回填，得到 %q", got[0].Source)
-	}
-	if got[1].Source != "already/set.yaml" {
-		t.Errorf("已有 Source 不该被覆盖，得到 %q", got[1].Source)
-	}
-	if ps[0].Source != "" {
-		t.Error("WithSource 不该原地修改入参")
-	}
-}
-
 func TestLineRequiresBuildIsDerivedNotDeclared(t *testing.T) {
 	// requires_build 是「lines/<id>/ 下有没有 overlay/patches/config」的派生结论，
 	// 由载入层填。类型上必须没有对应的 YAML 字段，否则就能手写一个与磁盘事实

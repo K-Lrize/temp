@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/K-Lrize/openwrt-build/internal/diag"
 	"gopkg.in/yaml.v3"
 )
 
@@ -38,9 +39,9 @@ type Config struct {
 // Load 读入 root 下的整棵配置树并做全部校验。
 //
 // 返回值分工：error 只用于「连目录都读不了」这类环境问题；配置本身的毛病
-// 一律走 Problems，这样一次运行能报出全部问题，而不是修一条跑一遍。
-// 单个 YAML 文件解析失败也算 Problems——一个文件写坏不该让其余文件失去校验。
-func Load(root string) (*Config, Problems, error) {
+// 一律走 diag.Problems，这样一次运行能报出全部问题，而不是修一条跑一遍。
+// 单个 YAML 文件解析失败也算 diag.Problems——一个文件写坏不该让其余文件失去校验。
+func Load(root string) (*Config, diag.Problems, error) {
 	info, err := os.Stat(root)
 	if err != nil {
 		return nil, nil, fmt.Errorf("读取配置根目录 %s: %w", root, err)
@@ -55,7 +56,7 @@ func Load(root string) (*Config, Problems, error) {
 		Devices: map[string]Device{},
 		Sets:    map[string]Set{},
 	}
-	var ps Problems
+	var ps diag.Problems
 
 	more, err := cfg.loadLines()
 	if err != nil {
@@ -84,8 +85,8 @@ func (c *Config) SortedLineIDs() []string     { return sortedKeys(c.Lines) }
 func (c *Config) SortedDeviceNames() []string { return sortedKeys(c.Devices) }
 func (c *Config) SortedSetNames() []string    { return sortedKeys(c.Sets) }
 
-func (c *Config) loadLines() (Problems, error) {
-	var ps Problems
+func (c *Config) loadLines() (diag.Problems, error) {
+	var ps diag.Problems
 	entries, err := readDirNames(filepath.Join(c.Root, dirLines))
 	if err != nil {
 		return nil, err
@@ -104,7 +105,7 @@ func (c *Config) loadLines() (Problems, error) {
 		}
 		line.RequiresBuild = requiresBuild
 
-		var one Problems
+		var one diag.Problems
 		if line.ID != id {
 			one = one.Errorf("line.id-path", "line.id %q 与目录名 %q 不符：目录名同时是 R2 命名空间前缀，两者必须一致", line.ID, id)
 		}
@@ -115,8 +116,8 @@ func (c *Config) loadLines() (Problems, error) {
 	return ps, nil
 }
 
-func (c *Config) loadSets() (Problems, error) {
-	var ps Problems
+func (c *Config) loadSets() (diag.Problems, error) {
+	var ps diag.Problems
 	dir := filepath.Join(c.Root, dirSets)
 	files, err := readDirNames(dir)
 	if err != nil {
@@ -134,7 +135,7 @@ func (c *Config) loadSets() (Problems, error) {
 			ps = append(ps, problem.WithSource(rel)...)
 			continue
 		}
-		var one Problems
+		var one diag.Problems
 		if set.Name != id {
 			one = one.Errorf("set.name-path", "set.name %q 与文件名 %q 不符", set.Name, name)
 		}
@@ -145,8 +146,8 @@ func (c *Config) loadSets() (Problems, error) {
 	return ps, nil
 }
 
-func (c *Config) loadDevices() (Problems, error) {
-	var ps Problems
+func (c *Config) loadDevices() (diag.Problems, error) {
+	var ps diag.Problems
 	entries, err := readDirNames(filepath.Join(c.Root, dirDevices))
 	if err != nil {
 		return nil, err
@@ -158,7 +159,7 @@ func (c *Config) loadDevices() (Problems, error) {
 			ps = append(ps, problem.WithSource(rel)...)
 			continue
 		}
-		var one Problems
+		var one diag.Problems
 		if device.Name != name {
 			one = one.Errorf("device.name-path", "device.name %q 与目录名 %q 不符", device.Name, name)
 		}
@@ -170,8 +171,8 @@ func (c *Config) loadDevices() (Problems, error) {
 }
 
 // validateCrossFile 查只有看到整棵树才能判定的规则。
-func (c *Config) validateCrossFile() Problems {
-	var ps Problems
+func (c *Config) validateCrossFile() diag.Problems {
+	var ps diag.Problems
 
 	usedLines := map[string]bool{}
 	usedSets := map[string]bool{}
@@ -181,7 +182,7 @@ func (c *Config) validateCrossFile() Problems {
 		// 有 overlay/patches/config 却借官方产物：官方那边不可能有你改过的东西，
 		// 这份配置永远编不出你想要的结果，而且不会有任何运行期迹象。
 		if line.RequiresBuild && line.Artifacts == ArtifactsOfficial {
-			var one Problems
+			var one diag.Problems
 			one = one.Errorf("line.requires-build",
 				"line %s 目录下有 %s 之一（源码相对官方有实质修改），却声明 artifacts=%s："+
 					"官方发布产物里不会包含你的改动",
@@ -193,7 +194,7 @@ func (c *Config) validateCrossFile() Problems {
 	for _, name := range c.SortedDeviceNames() {
 		device := c.Devices[name]
 		rel := path.Join(dirDevices, name, fileDevice)
-		var one Problems
+		var one diag.Problems
 
 		for _, lineID := range device.Lines {
 			if _, ok := c.Lines[lineID]; ok {
@@ -218,7 +219,7 @@ func (c *Config) validateCrossFile() Problems {
 		if usedLines[id] {
 			continue
 		}
-		var one Problems
+		var one diag.Problems
 		one = one.Warnf("line.unreferenced", "line %s 没有被任何设备引用", id)
 		ps = append(ps, one.WithSource(path.Join(dirLines, id, fileLine))...)
 	}
@@ -226,7 +227,7 @@ func (c *Config) validateCrossFile() Problems {
 		if usedSets[name] {
 			continue
 		}
-		var one Problems
+		var one diag.Problems
 		one = one.Warnf("set.unreferenced", "包集 %s 没有被任何设备 include", name)
 		ps = append(ps, one.WithSource(path.Join(dirSets, name+".yaml"))...)
 	}
@@ -238,10 +239,10 @@ func (c *Config) validateCrossFile() Problems {
 //
 // 静默忽略未知字段等于「配置写了等于没写」——上一代 device.yaml 的 channel:
 // 字段在改名之后如果被静默吞掉，设备会安静地落到错误的版本线上。
-func decodeFile(fullPath string, out any) Problems {
+func decodeFile(fullPath string, out any) diag.Problems {
 	f, err := os.Open(fullPath)
 	if err != nil {
-		var one Problems
+		var one diag.Problems
 		return one.Errorf("yaml", "打开失败：%v", err)
 	}
 	defer f.Close()
@@ -249,7 +250,7 @@ func decodeFile(fullPath string, out any) Problems {
 	dec := yaml.NewDecoder(f)
 	dec.KnownFields(true)
 	if err := dec.Decode(out); err != nil {
-		var one Problems
+		var one diag.Problems
 		return one.Errorf("yaml", "解析失败：%v", err)
 	}
 	return nil

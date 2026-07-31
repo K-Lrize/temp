@@ -1,6 +1,7 @@
 package config
 
 import (
+	"github.com/K-Lrize/openwrt-build/internal/diag"
 	"regexp"
 	"strings"
 )
@@ -30,8 +31,8 @@ var archByTarget = map[string]string{
 
 // Validate 校验单个 line 自身自洽。跨文件的规则（id 与目录名一致、
 // requires_build 与 artifacts 的关系）在载入层。
-func (l Line) Validate() Problems {
-	var ps Problems
+func (l Line) Validate() diag.Problems {
+	var ps diag.Problems
 
 	if !reIdent.MatchString(l.ID) {
 		ps = ps.Errorf("line.id", "id %q 非法：只允许小写字母、数字、点、连字符、下划线，且首字符为字母或数字", l.ID)
@@ -59,8 +60,8 @@ func (l Line) Validate() Problems {
 	return ps
 }
 
-func (l Line) validateSource() Problems {
-	var ps Problems
+func (l Line) validateSource() diag.Problems {
+	var ps diag.Problems
 	src := l.Source
 
 	if !strings.HasPrefix(src.Repo, "http://") && !strings.HasPrefix(src.Repo, "https://") {
@@ -106,8 +107,8 @@ func versionLine(s string) string {
 
 // Validate 校验单台设备自身自洽。跨文件规则（name 与目录名一致、
 // lines 引用的 line 存在、include 引用的 set 存在）在载入层。
-func (d Device) Validate() Problems {
-	var ps Problems
+func (d Device) Validate() diag.Problems {
+	var ps diag.Problems
 
 	if !reIdent.MatchString(d.Name) {
 		ps = ps.Errorf("device.name", "name %q 非法：只允许小写字母、数字、点、连字符、下划线", d.Name)
@@ -148,8 +149,8 @@ func (d Device) Validate() Problems {
 //
 // arch 打错一个字母的后果是：从错误架构的仓库拉包 -> 设备不可开机，
 // 而其余每一项校验都是绿的。这是这张收录表存在的全部理由。
-func (h Hardware) validateArch() Problems {
-	var ps Problems
+func (h Hardware) validateArch() diag.Problems {
+	var ps diag.Problems
 	key := h.TargetKey()
 	want, known := archByTarget[key]
 	if !known {
@@ -162,8 +163,8 @@ func (h Hardware) validateArch() Problems {
 }
 
 // Validate 校验单个包集自身自洽。
-func (s Set) Validate() Problems {
-	var ps Problems
+func (s Set) Validate() diag.Problems {
+	var ps diag.Problems
 	if !reIdent.MatchString(s.Name) {
 		ps = ps.Errorf("set.name", "name %q 非法：只允许小写字母、数字、点、连字符、下划线", s.Name)
 	}
@@ -178,8 +179,8 @@ func (s Set) Validate() Problems {
 //
 // 只查同一份文件内部的冲突；跨层（多个 set + device 合并之后）的冲突由
 // 合并算法在展开 variant 时报，那时才知道完整的层列表。
-func validatePackages(add, remove []string) Problems {
-	var ps Problems
+func validatePackages(add, remove []string) diag.Problems {
+	var ps diag.Problems
 
 	for _, list := range [][]string{add, remove} {
 		for _, name := range list {

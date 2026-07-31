@@ -1,6 +1,7 @@
 package config
 
 import (
+	"github.com/K-Lrize/openwrt-build/internal/diag"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -71,7 +72,7 @@ func goodTree() map[string]string {
 	}
 }
 
-func loadTree(t *testing.T, files map[string]string) (*Config, Problems) {
+func loadTree(t *testing.T, files map[string]string) (*Config, diag.Problems) {
 	t.Helper()
 	cfg, ps, err := Load(writeTree(t, files))
 	if err != nil {
@@ -259,7 +260,7 @@ func TestLoadEmptyTreeIsNotAnError(t *testing.T) {
 	}
 }
 
-func hasRule(ps Problems, rule string) bool {
+func hasRule(ps diag.Problems, rule string) bool {
 	for _, p := range ps {
 		if p.Rule == rule {
 			return true

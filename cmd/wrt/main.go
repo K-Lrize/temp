@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/K-Lrize/openwrt-build/internal/config"
+	"github.com/K-Lrize/openwrt-build/internal/diag"
 	"github.com/K-Lrize/openwrt-build/internal/resolve"
 )
 
@@ -160,8 +161,8 @@ func runLint(c ctx, args []string) error {
 		fmt.Fprintln(c.stdout, p)
 	}
 
-	errCount := problems.Count(config.SeverityError)
-	warnCount := problems.Count(config.SeverityWarn)
+	errCount := problems.Count(diag.SeverityError)
+	warnCount := problems.Count(diag.SeverityWarn)
 	fmt.Fprintf(c.stdout, "\n%d 个错误，%d 个提示\n", errCount, warnCount)
 	if errCount > 0 {
 		return fmt.Errorf("配置校验未通过：%d 个错误", errCount)

@@ -1,5 +1,7 @@
 package config
 
+import "github.com/K-Lrize/openwrt-build/internal/diag"
+
 // Layer 是参与合并的一层包清单。Name 只用于报错定位（"set:base-router"、
 // "device:mt3600be"）——五层合并之后，只说「dnsmasq 冲突」等于让人挨个翻文件。
 type Layer struct {
@@ -39,9 +41,9 @@ func (p Packages) List() []string {
 // 去重保留首次出现的位置而不是最后一次：包列表顺序参与固件指纹，靠后去重会让
 // 「往某个 set 里加一个别处已有的包」凭空改变全部引用它的设备的指纹，触发一次
 // 无意义的全量重建。
-func MergePackages(layers []Layer) (Packages, Problems) {
+func MergePackages(layers []Layer) (Packages, diag.Problems) {
 	var (
-		ps     Problems
+		ps     diag.Problems
 		result Packages
 		// 记住每个包名第一次是被哪一层引入的，冲突时才能点名两边。
 		addedBy   = map[string]string{}

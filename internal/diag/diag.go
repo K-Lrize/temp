@@ -1,4 +1,9 @@
-package config
+// Package diag 是全仓库共用的诊断类型。
+//
+// 单独成包而不是挂在 config 上：产出诊断的不止配置层——feed 的 Makefile
+// 校验、plan 的矩阵计算、gc 的引用判定都会报问题，它们没有任何理由为了一个
+// 诊断类型去依赖 config。
+package diag
 
 import (
 	"fmt"

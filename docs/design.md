@@ -166,9 +166,28 @@ remove:
   - wpad-wolfssl
 ```
 
-初始切分（从 mt3600be 现有的 ~120 个包拆出来）：
-`common`（curl/wget-ssl/rsync/jq/tcpdump/iperf3/htop）、`base-router`、`luci-zh`、
-`modem`、`dev-tools`、`monitoring`。
+实际切分（mt3600be 原本硬列的 124 个包，M0 里拆成 11 个）：
+
+| 包集 | 内容 |
+| --- | --- |
+| `common` | 每台设备（含虚拟机）都装的排障工具 |
+| `luci` | LuCI 主体、默认主题与核心页面中文语言包 |
+| `router-net` | DHCP/DNS、IPv6、nftables 转发、PPPoE、WireGuard |
+| `router-wifi` | wpad-openssl 变体（并排掉其余 wpad） |
+| `router-qos` | SQM/CAKE、BBR、中断均衡 |
+| `usb-storage` | USB 存储与 ext4 挂载 |
+| `modem` | USB 蜂窝模块与手机 USB 网络共享 |
+| `dns-filter` | SmartDNS 分流、banIP 黑名单 |
+| `ops` | 证书续期、DDNS、看门狗、定时任务、WoL、UPnP、日志轮转 |
+| `monitoring` | 流量统计与 Prometheus 指标导出 |
+| `dev-tools` | 上机排障用的 shell、编辑器与网络工具 |
+
+切分按**功能**而不是按包类型——「这台设备要不要 4G 模块 / USB 存储 / QoS」才是加第二台
+设备时真正要做的决定。
+
+**i18n 包永远与它翻译的那个 app 待在同一个集里**，不单独成一个「中文集」：
+`luci-i18n-<app>-zh-cn` 依赖 `luci-app-<app>`，一个独立的语言集会把它引用的每个 app
+都当依赖装回来，等于绕过了包集的取舍。（设计初稿里那个 `luci-zh` 正是这个错误。）
 
 **不支持 set 嵌套。** 合并函数写成接受**有序层列表**，所以将来插一层（如 `profiles/`）
 是配置变更而非代码变更，但现在不建空目录。
@@ -512,10 +531,49 @@ M3 是这次重构真正的目的地 —— 前面几步都是为了让"自己�
 
 ---
 
-## 13. 未决项
+## 13. 进度与交接
+
+> 截至 2026-07-31，M0 与 M1 已完成，共 16 个 commit 在本地 `main` 分支（未 push）。
+
+### 已落地
+
+| 包 | 职责 | 覆盖率 |
+| --- | --- | --- |
+| `internal/config` | 类型即 schema，载入 + 全部配置校验 | 94.1% |
+| `internal/diag` | 全仓库共用的诊断类型 | 100% |
+| `internal/resolve` | device × line → variant | 90.7% |
+| `internal/feed` | 自有包 Makefile 校验 | 97.3% |
+| `internal/repos` | 三层软件源装配 | 100% |
+| `internal/files` | overlay 有序层合并 + 构建期钩子 | 81.0% |
+| `internal/plan` | 三层指纹 + 三矩阵 + 远端比对 | 86.8% |
+| `internal/artifacts` | R2 路径规则与元数据类型（只有类型，无 I/O） | 76.9% |
+
+CLI：`wrt lint | resolve | plan | repos | files`（`go test -race ./...` 全绿）。
+
+### 实现期定下、初稿里没有的约定
+
+- **rootfs overlay 两层** —— 仓库根 `files/` + `devices/<name>/files/`，构建期钩子落
+  `files-hooks/`；钩子环境变量统一加 `WRT_` 前缀（`DEVICE`、`PACKAGES` 这类名字在
+  shell 环境里太通用，与 CI 或上游脚本撞车时症状是钩子按别人的值干活）。
+- **golden 基线放在产出它的包旁边**（`internal/resolve/testdata/`），不集中到仓库根。
+- **`internal/artifacts` 提前到 M1** —— plan 的远端比对需要读 R2 上那几份元数据，
+  与将来发布侧共用一份定义，避免两边各写一遍再漂移。目前只有类型与路径，没有 I/O。
+- **`wrt doctor` 暂不实现** —— 现阶段没有外部工具可检（docker/qemu/密钥要到 M2/M3
+  才进来），现在写只会是一份空壳。
+- **`feed/Makefile`（feed 根的那个）保留** —— 旧仓库的注释自己也说不确定是否必需，
+  现阶段没有能验证它的构建链路，等 M2 的软件包流水线跑通再决定删不删。
+
+### 下一步（M2）要先定的两件事
+
+1. **R2 的自定义域名。** 这些 URL 会被烧进固件的 `/etc/apk/repositories.d/`，刷机之后
+   改不了。第一天定最便宜，改起来的代价随已刷机设备数线性增长。
+2. **新密钥对什么时候生成。** 新仓库 = 新的 EC P-256 对（旧密钥不搬，借这次轮换）。
+   私钥进 GitHub Secrets + 离线备份，公钥进 git。发布链路一旦跑起来就不能再换。
+
+### 仍然未决
 
 1. ~~新仓库名~~ — 已定 `openwrt-build`
-2. **sets 的最终切分粒度** —— 等 mt3600be 的包列表真拆开时再定，M0 里做
+2. ~~sets 的切分粒度~~ — M0 已切成 11 个，见 §3.4
 3. **第二台实体设备是什么** —— 会影响 `sets/` 是否需要再分层，M5 之后再看
 
 ---

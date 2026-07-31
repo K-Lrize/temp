@@ -19,6 +19,7 @@ import (
 	"github.com/K-Lrize/openwrt-build/internal/diag"
 	"github.com/K-Lrize/openwrt-build/internal/feed"
 	"github.com/K-Lrize/openwrt-build/internal/files"
+	"github.com/K-Lrize/openwrt-build/internal/plan"
 	"github.com/K-Lrize/openwrt-build/internal/repos"
 	"github.com/K-Lrize/openwrt-build/internal/resolve"
 )
@@ -57,6 +58,12 @@ func commands() []command {
 			summary: "装配三层 apk 软件源地址（构建期 / 运行期两份）",
 			usage:   "wrt repos <device>@<line> --repo-base <url> --vermagic <vm> [--local-l1 <path>] [--local-kmod <path>]",
 			run:     runRepos,
+		},
+		{
+			name:    "plan",
+			summary: "内容寻址变更检测：这次改动到底要不要重新构建",
+			usage:   "wrt plan [--repo-base <url>] [--all]",
+			run:     runPlan,
 		},
 		{
 			name:    "files",
@@ -308,6 +315,42 @@ func runFiles(c ctx, args []string) error {
 	}
 	fmt.Fprintf(c.stdout, "%s 的 overlay 已组装到 %s\n", variant.ID, args[1])
 	return nil
+}
+
+func runPlan(c ctx, args []string) error {
+	fs := flag.NewFlagSet("plan", flag.ContinueOnError)
+	fs.SetOutput(c.stderr)
+	repoBase := fs.String("repo-base", os.Getenv("WRT_REPO_BASE"),
+		"R2 公网访问根；不给就无从判定远端状态，一切都算作需要构建")
+	all := fs.Bool("all", false, "连已确认无需构建的条目一起输出，便于核对「为什么这条被跳过了」")
+	rest, err := parseFlags(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(rest) > 0 {
+		return fmt.Errorf("plan 不接受位置参数，收到 %v", rest)
+	}
+
+	cfg, problems, err := config.Load(c.root)
+	if err != nil {
+		return err
+	}
+	if problems.HasError() {
+		return fmt.Errorf("配置有错，先跑 wrt lint：\n%s", problems)
+	}
+	variants, more := resolve.All(cfg)
+	if more.HasError() {
+		return fmt.Errorf("展开 variant 失败：\n%s", more)
+	}
+
+	result, err := plan.Build(c.root, cfg, variants, plan.NewHTTPRemote(*repoBase, nil))
+	if err != nil {
+		return err
+	}
+	if !*all {
+		result = result.Pending()
+	}
+	return emitJSON(c.stdout, result)
 }
 
 func emitJSON(w io.Writer, v any) error {

@@ -222,6 +222,48 @@ func TestFilesRejectsWrongArgCount(t *testing.T) {
 	}
 }
 
+func TestPlanWithoutRemoteListsEverything(t *testing.T) {
+	// 没配 repo base 就无从判定远端状态，保守地把全部条目当作需要构建。
+	stdout, _, err := runCLI(t, atRepo(t, "plan")...)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var p struct {
+		Toolchain []struct {
+			Line       string `json:"line"`
+			NeedsBuild bool   `json:"needs_build"`
+		} `json:"toolchain"`
+		Packages []struct{} `json:"packages"`
+		Firmware []struct {
+			Variant    string `json:"variant"`
+			NeedsBuild bool   `json:"needs_build"`
+		} `json:"firmware"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &p); err != nil {
+		t.Fatalf("输出不是 JSON: %v\n%s", err, stdout)
+	}
+
+	// 只有 25.12-selfbuild 是自建线，工具链矩阵就该只有它。
+	if len(p.Toolchain) != 1 || p.Toolchain[0].Line != "25.12-selfbuild" {
+		t.Errorf("工具链矩阵 = %+v", p.Toolchain)
+	}
+	if len(p.Firmware) != 3 {
+		t.Errorf("固件矩阵应当覆盖全部 variant，得到 %d 条", len(p.Firmware))
+	}
+	for _, e := range p.Firmware {
+		if !e.NeedsBuild {
+			t.Errorf("%s 在无法判定远端状态时应当被列为需要构建", e.Variant)
+		}
+	}
+}
+
+func TestPlanRejectsPositionalArgs(t *testing.T) {
+	if _, _, err := runCLI(t, atRepo(t, "plan", "mt3600be@25.12")...); err == nil {
+		t.Fatal("plan 不接受位置参数")
+	}
+}
+
 func TestHelpListsEveryCommand(t *testing.T) {
 	stdout, _, err := runCLI(t, "help")
 	if err != nil {

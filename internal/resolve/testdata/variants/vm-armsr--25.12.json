@@ -1,0 +1,32 @@
+{
+  "id": "vm-armsr@25.12",
+  "device": "vm-armsr",
+  "line": {
+    "id": "25.12",
+    "upstream": "25.12.5",
+    "artifacts": "official",
+    "requires_build": false
+  },
+  "hardware": {
+    "target": "armsr",
+    "subtarget": "armv8",
+    "profile": "generic",
+    "arch": "aarch64_generic"
+  },
+  "packages": [
+    "curl",
+    "wget-ssl",
+    "rsync",
+    "jq",
+    "tcpdump",
+    "iperf3",
+    "htop",
+    "luci",
+    "qemu-ga",
+    "openssh-server",
+    "openssh-keygen"
+  ],
+  "image": {
+    "rootfs_partsize": 256
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "id": "vm-armsr@25.12-selfbuild",
+  "device": "vm-armsr",
+  "line": {
+    "id": "25.12-selfbuild",
+    "upstream": "25.12.5",
+    "artifacts": "self",
+    "requires_build": false,
+    "source": {
+      "repo": "https://github.com/openwrt/openwrt",
+      "commit": "f0a60eee2fe051741c643ea6118718aae1ef17fb",
+      "ref": "v25.12.5"
+    }
+  },
+  "hardware": {
+    "target": "armsr",
+    "subtarget": "armv8",
+    "profile": "generic",
+    "arch": "aarch64_generic"
+  },
+  "packages": [
+    "curl",
+    "wget-ssl",
+    "rsync",
+    "jq",
+    "tcpdump",
+    "iperf3",
+    "htop",
+    "luci",
+    "qemu-ga",
+    "openssh-server",
+    "openssh-keygen"
+  ],
+  "image": {
+    "rootfs_partsize": 256
+  }
+}

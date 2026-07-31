@@ -203,6 +203,25 @@ func TestReposRequiresVermagic(t *testing.T) {
 	}
 }
 
+func TestFilesAssemblesOverlay(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "overlay")
+	if _, _, err := runCLI(t, atRepo(t, "files", "vm-armsr@25.12", dest)...); err != nil {
+		t.Fatal(err)
+	}
+	// vm-armsr 不装 zsh，钩子会跳过；通用层的文件必须在。
+	if _, err := os.Stat(filepath.Join(dest, "etc/uci-defaults/00-base")); err != nil {
+		t.Fatalf("通用层 overlay 没有落地: %v", err)
+	}
+}
+
+func TestFilesRejectsWrongArgCount(t *testing.T) {
+	for _, args := range [][]string{{"files"}, {"files", "vm-armsr@25.12"}} {
+		if _, _, err := runCLI(t, atRepo(t, args...)...); err == nil {
+			t.Errorf("%v 应当报错", args)
+		}
+	}
+}
+
 func TestHelpListsEveryCommand(t *testing.T) {
 	stdout, _, err := runCLI(t, "help")
 	if err != nil {

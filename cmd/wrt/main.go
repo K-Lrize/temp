@@ -18,6 +18,7 @@ import (
 	"github.com/K-Lrize/openwrt-build/internal/config"
 	"github.com/K-Lrize/openwrt-build/internal/diag"
 	"github.com/K-Lrize/openwrt-build/internal/feed"
+	"github.com/K-Lrize/openwrt-build/internal/files"
 	"github.com/K-Lrize/openwrt-build/internal/repos"
 	"github.com/K-Lrize/openwrt-build/internal/resolve"
 )
@@ -56,6 +57,12 @@ func commands() []command {
 			summary: "装配三层 apk 软件源地址（构建期 / 运行期两份）",
 			usage:   "wrt repos <device>@<line> --repo-base <url> --vermagic <vm> [--local-l1 <path>] [--local-kmod <path>]",
 			run:     runRepos,
+		},
+		{
+			name:    "files",
+			summary: "组装设备的 rootfs overlay（合并文件层 + 跑构建期钩子）",
+			usage:   "wrt files <device>@<line> <dest>",
+			run:     runFiles,
 		},
 	}
 }
@@ -277,6 +284,30 @@ func runRepos(c ctx, args []string) error {
 		return err
 	}
 	return emitJSON(c.stdout, assembled)
+}
+
+func runFiles(c ctx, args []string) error {
+	if len(args) != 2 {
+		return errors.New("用法: wrt files <device>@<line> <dest>")
+	}
+
+	cfg, problems, err := config.Load(c.root)
+	if err != nil {
+		return err
+	}
+	if problems.HasError() {
+		return fmt.Errorf("配置有错，先跑 wrt lint：\n%s", problems)
+	}
+
+	variant, err := resolve.One(cfg, args[0])
+	if err != nil {
+		return err
+	}
+	if err := files.Assemble(c.root, variant, args[1]); err != nil {
+		return err
+	}
+	fmt.Fprintf(c.stdout, "%s 的 overlay 已组装到 %s\n", variant.ID, args[1])
+	return nil
 }
 
 func emitJSON(w io.Writer, v any) error {

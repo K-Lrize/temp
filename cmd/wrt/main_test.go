@@ -154,6 +154,55 @@ func TestResolveRejectsBadArguments(t *testing.T) {
 	}
 }
 
+func TestReposEmitsBothLists(t *testing.T) {
+	stdout, _, err := runCLI(t, atRepo(t,
+		"repos", "mt3600be@25.12",
+		"--repo-base", "https://repo.example.com",
+		"--vermagic", "6.12.94-1-abc")...)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var r struct {
+		Build   []string `json:"build"`
+		Runtime []string `json:"runtime"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &r); err != nil {
+		t.Fatalf("输出不是 JSON: %v\n%s", err, stdout)
+	}
+	if len(r.Build) == 0 || len(r.Runtime) == 0 {
+		t.Fatalf("两份列表都不该为空: %+v", r)
+	}
+}
+
+func TestFlagsWorkOnEitherSideOfThePositional(t *testing.T) {
+	// 标准库的 flag 遇到第一个非 flag 参数就停止解析。这条如果回归，
+	// 表现是 --vermagic 被静默当成位置参数，而不是报错。
+	before := atRepo(t, "repos", "--repo-base", "https://r.example.com", "--vermagic", "vm", "mt3600be@25.12")
+	after := atRepo(t, "repos", "mt3600be@25.12", "--repo-base", "https://r.example.com", "--vermagic", "vm")
+
+	outBefore, _, err := runCLI(t, before...)
+	if err != nil {
+		t.Fatalf("flag 在前应当能用: %v", err)
+	}
+	outAfter, _, err := runCLI(t, after...)
+	if err != nil {
+		t.Fatalf("flag 在后应当能用: %v", err)
+	}
+	if outBefore != outAfter {
+		t.Error("两种写法应当得到相同结果")
+	}
+}
+
+func TestReposRequiresVermagic(t *testing.T) {
+	// 缺 vermagic 时宁可失败也不能产出一份「看着正常、实际装不上任何
+	// 驱动」的软件源列表。
+	_, _, err := runCLI(t, atRepo(t, "repos", "mt3600be@25.12", "--repo-base", "https://r.example.com")...)
+	if err == nil {
+		t.Fatal("缺 vermagic 应当报错")
+	}
+}
+
 func TestHelpListsEveryCommand(t *testing.T) {
 	stdout, _, err := runCLI(t, "help")
 	if err != nil {

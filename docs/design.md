@@ -80,7 +80,10 @@ lines/<id>/
 
 devices/<name>/
 ├── device.yaml
-└── files/                    rootfs overlay
+└── files/                    本设备的 rootfs overlay
+
+files/                        所有设备共用的 rootfs overlay（合并时排在设备层之前）
+files-hooks/                  组装 overlay 时执行的构建期脚本（如按需拉 zsh 插件）
 
 sets/<name>.yaml              包集
 
@@ -88,6 +91,9 @@ feed/
 ├── feeds.conf                外部 feed pin 到 commit
 └── <pkg>/                    自有包源码（Makefile + files/）
 ```
+
+rootfs overlay 与包清单一样是**有序层**：`files/` 在前，`devices/<name>/files/`
+在后，同路径后者覆盖前者。层数将来要加就加，合并函数不该硬编码两层。
 
 ### 3.2 line.yaml
 
@@ -288,11 +294,13 @@ variant_fp = sha256(device.yaml + files/ + 该 device 实际 include 的 sets
 
 ## 6. 代码结构
 
+`✓` 已落地，其余按 §12 的阶段推进。
+
 ```
-cmd/wrt/main.go
+cmd/wrt/main.go              ✓
 internal/
-├── config/      types.go = schema = 唯一校验点；load.go；validate.go
-├── resolve/     device × line → Variant
+├── config/      types.go = schema = 唯一校验点；load.go；validate.go；packages.go  ✓
+├── resolve/     device × line → Variant                                            ✓
 ├── repos/       三层 URL 装配（纯函数）
 ├── plan/        指纹计算 + 远端比对 → 三矩阵
 ├── artifacts/   R2 路径规则 + build/current/manifest/latest 类型
@@ -301,8 +309,10 @@ internal/
 ├── source/      src prepare/export
 └── sign/        EC P-256 签名与校验
 scripts/         qemu-boot.sh、local-ib.sh（真的是 shell 的活）
-testdata/        golden 基线
 ```
+
+golden 基线按 Go 惯例放在产出它的包旁边（`internal/resolve/testdata/variants/`），
+不集中到仓库根——基线与产出它的代码待在一起，改代码时不会漏改基线。
 
 **没有 Makefile。** `wrt --help` 本身就是自文档入口，再套一层 make 只是又一个要同步的
 地方。qemu 冒烟和本地 IB 组装做成 `wrt boot` / `wrt build-local`，内部 exec 那两个脚本。
@@ -313,8 +323,8 @@ testdata/        golden 基线
 ### CLI
 
 ```
-wrt lint                                   全部配置校验（schema + 语义 + feed Makefile）
-wrt resolve <variant>|--all                打印 Variant JSON
+wrt lint                                   全部配置校验（结构 + 语义 + 跨层包冲突；feed Makefile 规则待补）  ✓
+wrt resolve <variant>|--all                打印 Variant JSON                                                  ✓
 wrt plan [--repo-base URL] [--force]       三矩阵 + release_id
 wrt repos <variant> --vermagic X --repo-base Y [--local-l1 PATH]
 wrt files <variant> <dest>                 组装 files overlay（复制 + 跑构建期脚本）
@@ -326,7 +336,7 @@ wrt verify <target>                        签名与校验和验证
 wrt gc [--apply] [--keep N]                引用计数回收，默认 dry-run
 wrt boot <variant>                         qemu 冒烟
 wrt build-local <variant>                  本地 Docker IB 组装
-wrt doctor                                 环境自检
+wrt doctor                                 环境自检（等 docker/qemu 这类外部依赖进来再写，现在写只会是空壳）
 wrt schema export                          导出 JSON Schema
 ```
 
@@ -487,8 +497,8 @@ APK 版本号规则（旧仓库 `docs/reference/apk-versioning.md` 的沉淀）*
 
 | 阶段 | 内容 | 出口标准 |
 | --- | --- | --- |
-| **M0** | 仓库骨架；`config` 类型 + `Validate()`；`wrt lint` / `resolve`；sets 拆分 | 对同一份配置，`wrt resolve` 与旧仓库 `expected/resolved.json` 语义等价 |
-| **M1** | `repos` / `files` / `plan` + 纯函数单测 + golden 基线 | `wrt plan` 在无变更时输出三个空矩阵（幂等性证明） |
+| **M0** ✓ | 仓库骨架；`config` 类型 + `Validate()`；`wrt lint` / `resolve`；sets 拆分 | ✓ 对同一份配置，`wrt resolve` 与旧仓库 `expected/resolved.json` 语义等价（`TestMigrationPreservesPackageSets` 逐包核对 124 项） |
+| **M1** | `repos` / `files` / `plan` + 纯函数单测 | `wrt plan` 在无变更时输出三个空矩阵（幂等性证明） |
 | **M2** | `artifacts` / `publish` / `meta`；`release.yml` + `_firmware.yml`；先跑通 `artifacts: official` 的 vm-armsr | 一次 push 产出一份可刷的固件，落到新 R2 布局 |
 | **M3** | `_toolchain.yml` + `wrt src prepare/export`；跑通 `artifacts: self` | **自建 SDK/IB 落地**；`25.12-selfbuild` line 产出可用的 SDK/IB/kmod/base |
 | **M4** | `gc` + `verify` + qemu 冒烟 + PR 门禁 `ci.yml` | qemu 里 `apk update` 无 UNTRUSTED |

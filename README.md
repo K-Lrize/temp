@@ -18,16 +18,38 @@ Cloudflare R2，设备通过标准 `apk` 在线更新。
 不变量：**两台设备共用一条 line，当且仅当它们可以安全共用同一份 SDK/IB、同一份 kmod
 仓、同一份用户态包仓库。**
 
+## 目录
+
+```
+lines/<id>/line.yaml          源码基线 + 产物身份（overlay/ patches/ config/ 存在即生效）
+devices/<name>/device.yaml    硬件事实 + 装什么包 + 出货到哪几条 line
+sets/<name>.yaml              可复用的包清单
+files/                        所有设备共用的 rootfs overlay
+files-hooks/                  组装 overlay 时执行的构建期脚本
+feed/                         自有软件包源码 + pin 到 commit 的外部 feed
+cmd/ internal/                wrt 本体
+```
+
 ## 用法
 
 ```bash
-go run ./cmd/wrt --help          # 自文档入口
+go run ./cmd/wrt help            # 自文档入口
 go run ./cmd/wrt lint            # 校验全部配置
 go run ./cmd/wrt resolve --all   # 展开全部 variant
 go run ./cmd/wrt resolve mt3600be@25.12
 ```
 
 装成命令：`go install ./cmd/wrt`
+
+## 开发
+
+```bash
+go test -race ./...                       # 全部测试
+go test ./internal/resolve -update        # 刷新 variant golden 基线
+```
+
+改了解析逻辑就会在 golden 基线上显示成逐行 diff。纯重构要求零 diff；
+行为确实要变时刷新基线，并在 commit message 里说清楚为什么变。
 
 ## 文档
 

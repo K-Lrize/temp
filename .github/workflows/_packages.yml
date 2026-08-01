@@ -1,0 +1,192 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+#
+# 可复用 workflow：为单个 (line, arch) 编自有 feed 的软件包（L1）并发布。
+# 步骤即编排——每一步要么调一个 wrt 动词、要么调 SDK 自带工具（scripts/feeds
+# / make），逻辑不落在这里。矩阵展开与「要不要编」都在 release.yml 的 plan 里
+# 做完，这里只管「给定一个 arch，编出来、签好、发出去」。
+#
+# SDK 从哪来看 artifacts：
+#   official  从 downloads.openwrt.org 下官方 SDK（线借官方 base/kmod，但自己的
+#             包仍要用官方 SDK 编出来）——不依赖自建工具链，现在就能跑。
+#   self      从 R2 拉自建 SDK（toolchain job 的产物）——那条 job 属更后的里程碑，
+#             在它落地前，self 线的这一步会因拉不到 SDK 而如实失败，不加 guard。
+#
+# 硬前提：自有包必须签名，否则设备端 apk 装包报 UNTRUSTED。需在仓库配置：
+#   机密  secrets.APK_PRIVATE_KEY / secrets.APK_PUBLIC_KEY（一对 apk 签名密钥）
+#         secrets.R2_ACCESS_KEY_ID / secrets.R2_SECRET_ACCESS_KEY
+#   变量  vars.R2_ENDPOINT / vars.R2_BUCKET / vars.R2_PUBLIC_URL
+
+name: (internal) Build packages for arch
+
+on:
+  workflow_call:
+    inputs:
+      line:
+        required: true
+        type: string
+      arch:
+        required: true
+        type: string
+      sdk_target:
+        description: "target/subtarget 组合路径（例: armsr/armv8）"
+        required: true
+        type: string
+      openwrt_version:
+        required: true
+        type: string
+      artifacts:
+        description: "official | self"
+        required: true
+        type: string
+      fingerprint:
+        description: "plan 算好的 packages 层指纹，写进 build-meta.json 供下次 plan 比对"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  packages:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    # 同一 (line, arch) 串行发布：设备 apk update 时不能撞见一份索引已换、但它
+    # 指向的某个 apk 还没传完的中间态。
+    concurrency:
+      group: publish-packages-${{ inputs.line }}-${{ inputs.arch }}
+      cancel-in-progress: false
+    env:
+      WRT_S3_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+      WRT_S3_BUCKET: ${{ vars.R2_BUCKET }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      REPO_BASE: ${{ vars.R2_PUBLIC_URL }}
+      LINE: ${{ inputs.line }}
+      ARCH: ${{ inputs.arch }}
+      SDK_TARGET: ${{ inputs.sdk_target }}
+      OPENWRT_VERSION: ${{ inputs.openwrt_version }}
+      ARTIFACTS: ${{ inputs.artifacts }}
+      FINGERPRINT: ${{ inputs.fingerprint }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: wrt
+      - run: |
+          chmod +x wrt
+          echo "WRT=$PWD/wrt" >> "$GITHUB_ENV"
+
+      - name: 安装构建依赖
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential python3 python3-setuptools rsync unzip wget zstd file xz-utils gawk \
+            git libncurses-dev
+
+      - name: ccache 分桶（按周）
+        id: ccache_bucket
+        run: echo "bucket=$(date -u +%Y-%W)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-pkg-${{ inputs.arch }}-${{ steps.ccache_bucket.outputs.bucket }}
+          restore-keys: ccache-pkg-${{ inputs.arch }}-
+
+      - name: 取得 SDK（official 下官方 / self 拉自建）
+        run: |
+          mkdir -p sdk
+          if [ "$ARTIFACTS" = official ]; then
+            BASE="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${SDK_TARGET}"
+            curl -fsSL --retry 3 -o sha256sums "$BASE/sha256sums"
+            SDK_FILE="$(grep -oE 'openwrt-sdk-[^[:space:]]+\.tar\.(zst|xz|gz)' sha256sums | head -1)"
+            [ -n "$SDK_FILE" ] || { echo "::error::sha256sums 里没有 sdk 归档"; exit 1; }
+            curl -fL --retry 3 -o "$SDK_FILE" "$BASE/$SDK_FILE"
+            EXPECT="$(grep -E "[[:space:]][*]?${SDK_FILE}\$" sha256sums | awk '{print $1}' | head -1)"
+            echo "${EXPECT}  ${SDK_FILE}" | sha256sum -c -
+            tar -xf "$SDK_FILE" --strip-components=1 -C sdk
+          else
+            echo "::error::self 线需自建 SDK（toolchain job，尚未落地）；${LINE} 暂不能编自有包"
+            exit 1
+          fi
+
+      - name: 注入自有 feed（wrt feeds：pin 外部 feed + 挂 custom_feed）
+        run: |
+          "$WRT" feeds --sdk sdk
+          cd sdk
+          for i in 1 2 3; do ./scripts/feeds update -a && break || { echo "重试 $i"; sleep 5; }; done
+          ./scripts/feeds install -a -p custom_feed
+
+      - name: 准备 apk 签名密钥
+        env:
+          APK_PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
+          APK_PUBLIC_KEY: ${{ secrets.APK_PUBLIC_KEY }}
+        run: |
+          # 密钥内容走 env、不插值进脚本体：避免 PEM 里的字符破坏引号闭合甚至被
+          # 当命令执行（脚本注入面，不是假设性风险）。
+          [ -n "$APK_PRIVATE_KEY" ] || { echo "::error::缺 secrets.APK_PRIVATE_KEY，自有包无法签名"; exit 1; }
+          [ -n "$APK_PUBLIC_KEY" ]  || { echo "::error::缺 secrets.APK_PUBLIC_KEY";  exit 1; }
+          printf '%s\n' "$APK_PRIVATE_KEY" > sdk/private-key.pem
+          printf '%s\n' "$APK_PUBLIC_KEY"  > sdk/public-key.pem
+          chmod 600 sdk/private-key.pem
+
+      - name: 初始化配置并强制开启索引签名
+        working-directory: sdk
+        run: |
+          export CCACHE_DIR="$HOME/.ccache"
+          make defconfig
+          grep -q '^CONFIG_SIGNED_PACKAGES=y' .config || {
+            echo 'CONFIG_SIGNED_PACKAGES=y' >> .config
+            make defconfig
+          }
+          grep -E '^CONFIG_(SIGNED_PACKAGES|USE_APK)=' .config || echo "::warning::未见 SIGNED_PACKAGES/USE_APK"
+
+      - name: 编译 custom_feed 的全部包
+        working-directory: sdk
+        run: |
+          export CCACHE_DIR="$HOME/.ccache"
+          PKGS="$(find "$GITHUB_WORKSPACE/feed" -mindepth 2 -maxdepth 2 -name Makefile -exec dirname {} \; | xargs -n1 basename | sort -u)"
+          [ -n "$PKGS" ] || { echo "feed 里没有自有包，无事可做"; exit 0; }
+          for pkg in $PKGS; do
+            echo "::group::编译 $pkg"
+            make "package/${pkg}/compile" -j"$(nproc)" -k || make "package/${pkg}/compile" V=s -j1
+            echo "::endgroup::"
+          done
+
+      - name: 生成包索引
+        working-directory: sdk
+        run: make package/index V=s
+
+      - name: 收集产物
+        run: |
+          OUT="out/packages/${ARCH}"
+          mkdir -p "$OUT"
+          find "sdk/bin/packages/${ARCH}/custom_feed" -name '*.apk' -exec cp {} "$OUT/" \; 2>/dev/null || true
+          cp "sdk/bin/packages/${ARCH}/custom_feed/packages.adb" "$OUT/" 2>/dev/null || true
+          echo "收集: $(find "$OUT" -name '*.apk' | wc -l) 个 apk + packages.adb"
+
+      - name: 索引签名自验（用同一套 SDK 的 apk 验刚签的索引）
+        run: |
+          OUT="out/packages/${ARCH}"
+          [ -f "$OUT/packages.adb" ] || { echo "::error::没生成 packages.adb"; exit 1; }
+          APK_BIN="sdk/staging_dir/host/bin/apk"
+          KEYS_DIR="$PWD/sdk"
+          if [ -x "$APK_BIN" ]; then
+            "$APK_BIN" verify -v --keys-dir "$KEYS_DIR" "$OUT/packages.adb" \
+              || { echo "::error::packages.adb 签名自验失败（签名侧问题，不是验证侧）"; exit 1; }
+            echo "✓ 签名自验通过"
+          else
+            echo "::warning::未找到 SDK 自带 apk，跳过自验"
+          fi
+
+      - name: build-meta.json（透传 plan 的 packages 指纹）
+        run: |
+          OUT="out/packages/${ARCH}"
+          "$WRT" meta packages --fingerprint "$FINGERPRINT" > "$OUT/build-meta.json"
+
+      - name: 发布到 R2（内容→索引→标记，顺序由 wrt publish 内置）
+        run: |
+          "$WRT" publish "out/packages/${ARCH}" "${LINE}/packages/${ARCH}"
+
+      - name: 安全清理
+        if: always()
+        run: rm -f sdk/private-key.pem

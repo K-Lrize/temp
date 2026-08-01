@@ -1,0 +1,136 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+#
+# 可复用 workflow：组装并发布单个 variant 的固件（official 线）。步骤即编排——
+# 每一步要么调一个 wrt 动词、要么下 IB / make image，逻辑不落在这里。
+# 与 scripts/local-ib.sh（本地测试工具）各走各的：这里在 GH runner 上直接
+# make image（runner 本身就是 ubuntu，装上依赖即可，不必再套 Docker）。
+#
+# 未做（留后续）：manifest 回归门禁（与上一个 release 比，有包消失即 fail）——
+# 需要拉上一份 .manifest 比对，单独一步，M2 先不挡。
+
+name: (internal) Assemble firmware
+
+on:
+  workflow_call:
+    inputs:
+      variant:
+        required: true
+        type: string
+      release_id:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  firmware:
+    runs-on: ubuntu-24.04
+    env:
+      WRT_S3_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+      WRT_S3_BUCKET: ${{ vars.R2_BUCKET }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      REPO_BASE: ${{ vars.R2_PUBLIC_URL }}
+      VARIANT: ${{ inputs.variant }}
+      RELEASE_ID: ${{ inputs.release_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: wrt
+      - run: |
+          chmod +x wrt
+          echo "WRT=$PWD/wrt" >> "$GITHUB_ENV"
+
+      - name: 读取 variant 事实（并拦住 self 线）
+        run: |
+          R="$($WRT resolve "$VARIANT")"
+          echo "$R" | jq .
+          [ "$(echo "$R" | jq -r .line.artifacts)" = official ] || {
+            echo "::error::M2 只组装 official 线；$VARIANT 是 self（需先跑 toolchain/packages，属 M3）"
+            exit 1
+          }
+          {
+            echo "TARGET=$(echo "$R" | jq -r .hardware.target)"
+            echo "SUBTARGET=$(echo "$R" | jq -r .hardware.subtarget)"
+            echo "PROFILE=$(echo "$R" | jq -r .hardware.profile)"
+            echo "OPENWRT_VERSION=$(echo "$R" | jq -r .line.openwrt_version)"
+            echo "DEVICE=$(echo "$R" | jq -r .device)"
+            echo "LINE=$(echo "$R" | jq -r .line.id)"
+            echo "PARTSIZE=$(echo "$R" | jq -r '.image.rootfs_partsize // 0')"
+            echo "PACKAGES=$(echo "$R" | jq -r '.packages | join(" ")')"
+          } >> "$GITHUB_ENV"
+
+      - name: 磁盘预检
+        run: |
+          avail=$(df -Pk . | awk 'NR==2{print int($4/1048576)}')
+          [ "$avail" -ge 10 ] || { echo "::error::可用磁盘 ${avail}GiB < 10GiB"; exit 1; }
+
+      - name: 安装 ImageBuilder 依赖
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential python3 python3-setuptools rsync unzip wget zstd file xz-utils gawk
+
+      - name: 下载官方 ImageBuilder 并强制校验 sha256
+        run: |
+          IB_BASE="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${SUBTARGET}"
+          curl -fsSL --retry 3 -o sha256sums "$IB_BASE/sha256sums"
+          IB_FILE="$(grep -oE 'openwrt-imagebuilder-[^[:space:]]+\.tar\.(zst|xz|gz)' sha256sums | head -1)"
+          [ -n "$IB_FILE" ] || { echo "::error::sha256sums 里没有 imagebuilder 归档"; exit 1; }
+          curl -fL --retry 3 -o "$IB_FILE" "$IB_BASE/$IB_FILE"
+          EXPECT="$(grep -E "[[:space:]][*]?${IB_FILE}\$" sha256sums | awk '{print $1}' | head -1)"
+          echo "${EXPECT}  ${IB_FILE}" | sha256sum -c -
+          mkdir -p ib && tar -xf "$IB_FILE" --strip-components=1 -C ib
+          echo "IB=$PWD/ib" >> "$GITHUB_ENV"
+
+      - name: 从官方 IB 抠 vermagic（mode=download 的权威来源）
+        run: |
+          REPOF=""
+          for c in "$IB/repositories" "$IB/repositories.conf"; do
+            [ -f "$c" ] && { REPOF="$c"; break; }
+          done
+          VM="$(grep -oE '/kmods/[^/]+/' "$REPOF" | head -1 | sed 's|/kmods/||;s|/||')"
+          [ -n "$VM" ] || { echo "::error::无法从官方 IB 抠出 vermagic"; exit 1; }
+          echo "VERMAGIC=$VM" >> "$GITHUB_ENV"
+
+      - name: 装配三层软件源与 rootfs overlay
+        run: |
+          REPOS="$($WRT repos "$VARIANT" --vermagic "$VERMAGIC" --repo-base "$REPO_BASE")"
+          echo "$REPOS" | jq -r '.build[]' > "$IB/repositories.conf"
+          cp "$IB/repositories.conf" "$IB/repositories"
+          "$WRT" files "$VARIANT" "$IB/files-overlay"
+          mkdir -p "$IB/files-overlay/etc/apk/repositories.d"
+          echo "$REPOS" | jq -r '.runtime[]' > "$IB/files-overlay/etc/apk/repositories.d/99-custom.list"
+
+      - name: make image
+        working-directory: ib
+        run: |
+          ARGS=(PROFILE="$PROFILE" PACKAGES="$PACKAGES" FILES=files-overlay BIN_DIR=out)
+          [ "$PARTSIZE" -gt 0 ] && ARGS+=(ROOTFS_PARTSIZE="$PARTSIZE")
+          make image "${ARGS[@]}"
+
+      - name: 产物形状断言
+        run: |
+          img="$(ls "$IB"/out/*.img.gz 2>/dev/null | head -1 || true)"
+          [ -n "$img" ] || { echo "::error::make image 没产出 .img.gz"; exit 1; }
+
+      - name: 组装发布目录（固件 + manifest + latest 指针）
+        run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # R2 布局：devices/<device>/<line>/releases/<release_id>/。这里在 shell 里
+          # 拼路径，与 internal/artifacts 的规则保持一致。
+          LINEDIR="devices/${DEVICE}/${LINE}"
+          RELDIR="${LINEDIR}/releases/${RELEASE_ID}"
+          mkdir -p "stage/${RELDIR}"
+          cp "$IB"/out/*.img.gz "stage/${RELDIR}/"
+          cp "$IB"/out/sha256sums "stage/${RELDIR}/" 2>/dev/null || true
+          "$WRT" meta manifest "$VARIANT" --release-id "$RELEASE_ID" --vermagic "$VERMAGIC" \
+            --ci-run-url "$RUN_URL" > "stage/${RELDIR}/manifest.json"
+          "$WRT" meta latest --release-id "$RELEASE_ID" > "stage/${LINEDIR}/latest.json"
+          find stage -type f | sed 's|^stage/||'
+
+      - name: 发布到 R2（内容→索引→指针）
+        run: |
+          "$WRT" publish stage ""

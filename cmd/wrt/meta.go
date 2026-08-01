@@ -187,18 +187,29 @@ func runMetaCurrent(c ctx, args []string) error {
 func runMetaPackages(c ctx, args []string) error {
 	fs := flag.NewFlagSet("meta packages", flag.ContinueOnError)
 	fs.SetOutput(c.stderr)
+	fp := fs.String("fingerprint", "", "plan 已算好的 packages 层指纹（CI 首选：指纹只算一次，这里只透传盖时戳）")
 	rest, err := parseFlags(fs, args)
 	if err != nil {
 		return err
 	}
-	if len(rest) != 1 {
-		return errors.New("用法: wrt meta packages <device>@<line>")
+
+	// 两条取值路径，指向同一个 fp.Feed：
+	//   --fingerprint <fp>       CI 用，plan 算好后透传，遵守「指纹只算一次」；
+	//   <device>@<line>（位置参）  本地手动核对时用，就地重算（结果与 plan 一致）。
+	feedFP := *fp
+	switch {
+	case feedFP != "" && len(rest) == 0:
+	case feedFP == "" && len(rest) == 1:
+		_, computed, err := variantFingerprints(c, rest[0])
+		if err != nil {
+			return err
+		}
+		feedFP = computed.Feed
+	default:
+		return errors.New("用法: wrt meta packages --fingerprint <fp>  或  wrt meta packages <device>@<line>")
 	}
-	_, fp, err := variantFingerprints(c, rest[0])
-	if err != nil {
-		return err
-	}
-	return emitJSON(c.stdout, artifacts.PackagesMeta{FeedFingerprint: fp.Feed, UpdatedAt: stamp(time.Now())})
+
+	return emitJSON(c.stdout, artifacts.PackagesMeta{FeedFingerprint: feedFP, UpdatedAt: stamp(time.Now())})
 }
 
 // sourceCommit 取 variant 的上游源码 commit，official 线没有 source 时为空。

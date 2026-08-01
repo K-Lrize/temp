@@ -1,0 +1,119 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+#
+# 单一编排入口。needs: 就是依赖图，从上往下读一遍即顺序——不用 workflow_run
+# 触发链、不用互相探测"对方在不在跑"。逻辑全在 wrt 里，这里只剩编排。
+#
+# M2 范围：只组装 official 线、且设备不装自有包的固件（vm-armsr）。自建 SDK
+# （toolchain）与自有包（packages）两个 job 属 M3，届时插在 plan 与 firmware
+# 之间即可，不改这里的骨架。
+#
+# 接入前需在仓库配置：
+#   变量  vars.R2_PUBLIC_URL（设备/apk 面向的公网根）
+#         vars.R2_ENDPOINT（S3 端点）  vars.R2_BUCKET（桶名）
+#   机密  secrets.R2_ACCESS_KEY_ID  secrets.R2_SECRET_ACCESS_KEY
+# 第三方 action 现按 tag 引用；生产前应改为按 commit SHA 固定（DESIGN §9）。
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: ["lines/**", "devices/**", "sets/**", "feed/**", "files/**", "files-gen/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      packages: ${{ steps.plan.outputs.packages }}
+      firmware: ${{ steps.plan.outputs.firmware }}
+      release_id: ${{ steps.plan.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: 构建 wrt（一次 build，下游 job 复用同一字节的二进制）
+        run: go build -o wrt ./cmd/wrt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wrt
+          path: wrt
+          retention-days: 1
+
+      - name: 校验配置
+        run: ./wrt lint
+
+      - name: 计算 release_id 与固件矩阵
+        id: plan
+        env:
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          RELEASE_ID="$(./wrt id release)"
+          echo "release_id=${RELEASE_ID}" >> "$GITHUB_OUTPUT"
+
+          PLAN="$(./wrt plan --repo-base '${{ vars.R2_PUBLIC_URL }}')"
+          echo "${PLAN}" | jq .
+          echo "packages=$(echo "${PLAN}" | jq -c '.packages')" >> "$GITHUB_OUTPUT"
+          echo "firmware=$(echo "${PLAN}" | jq -c '.firmware')" >> "$GITHUB_OUTPUT"
+
+  packages:
+    needs: plan
+    if: ${{ !cancelled() && needs.plan.outputs.packages != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        p: ${{ fromJson(needs.plan.outputs.packages) }}
+    uses: ./.github/workflows/_packages.yml
+    with:
+      line: ${{ matrix.p.line }}
+      arch: ${{ matrix.p.arch }}
+      sdk_target: ${{ matrix.p.sdk_target }}
+      openwrt_version: ${{ matrix.p.openwrt_version }}
+      artifacts: ${{ matrix.p.artifacts }}
+      fingerprint: ${{ matrix.p.fingerprint }}
+    secrets: inherit
+
+  firmware:
+    needs: [plan, packages]
+    # !cancelled() 是必需的，不是保险：无变更时 firmware 矩阵为空 → 该 job 被
+    # skip，而 needs 里出现被 skip 的 job 会连坐让下游 gc 也被 skip。少了这一句，
+    # "没改动"这个最常见情况下整条流水线会静默什么都不干、还显示绿色。
+    # packages 必须先于 firmware：设备装的自有包(L1)得先发布到 R2，固件组装时
+    # apk 才拉得到。packages 失败则不组装固件（否则会做出装不上包的固件）。
+    if: ${{ !cancelled() && needs.packages.result != 'failure' && needs.plan.outputs.firmware != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        v: ${{ fromJson(needs.plan.outputs.firmware) }}
+    uses: ./.github/workflows/_firmware.yml
+    with:
+      variant: ${{ matrix.v.variant }}
+      release_id: ${{ needs.plan.outputs.release_id }}
+    secrets: inherit
+
+  gc:
+    needs: [plan, packages, firmware]
+    if: ${{ !cancelled() && needs.packages.result != 'failure' && needs.firmware.result != 'failure' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: wrt
+      - run: chmod +x wrt
+      - name: 回收旧产物
+        # M2 先 dry-run：跑顺几轮、人工核对删的确实是该删的，再改成 `--apply`。
+        # 30% 熔断在 --apply 时兜底。
+        env:
+          WRT_S3_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+          WRT_S3_BUCKET: ${{ vars.R2_BUCKET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: ./wrt gc

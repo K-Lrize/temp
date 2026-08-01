@@ -72,6 +72,12 @@ func commands() []command {
 			run:     runFiles,
 		},
 		{
+			name:    "feeds",
+			summary: "把外部 feed pin 覆盖进 SDK 的 feeds.conf.default 并注入自有 feed",
+			usage:   "wrt feeds --sdk <sdk 目录>",
+			run:     runFeeds,
+		},
+		{
 			name:    "meta",
 			summary: "生成发布用的元数据 JSON（build/current/manifest/latest/packages）",
 			usage:   "wrt meta <manifest|latest|build|current|packages> <variant> [flags]",
@@ -88,6 +94,12 @@ func commands() []command {
 			summary: "引用计数回收 R2 旧产物（默认 dry-run，超阈值熔断）",
 			usage:   "wrt gc [--keep N] [--apply] [--pin <d>@<line>:<rid>]",
 			run:     runGC,
+		},
+		{
+			name:    "id",
+			summary: "从 CI 环境生成 build_id / release_id（供 workflow 一处取值）",
+			usage:   "wrt id <build|release>",
+			run:     runID,
 		},
 	}
 }

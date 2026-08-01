@@ -3,5 +3,5 @@
 id: "25.12"
 description: OpenWrt 25.12 官方稳定线，直接使用官方预编译产物
 
-upstream: 25.12.5
+openwrt_version: 25.12.5
 artifacts: official

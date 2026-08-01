@@ -75,7 +75,7 @@ func Assemble(v resolve.Variant, opt Options) (Repos, error) {
 	var (
 		repoBase     = strings.TrimRight(opt.RepoBase, "/")
 		upstreamRoot = strings.TrimRight(cmp.Or(opt.UpstreamRoot, DefaultUpstreamRoot), "/")
-		upstreamBase = upstreamRoot + "/releases/" + v.Line.Upstream
+		upstreamBase = upstreamRoot + "/releases/" + v.Line.OpenWrtVersion
 		lineBase     = repoBase + "/" + v.Line.ID
 		targetPath   = "/targets/" + v.Hardware.TargetKey()
 		r            Repos

@@ -14,10 +14,10 @@ func tree(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		"lines/25.12/line.yaml": "id: \"25.12\"\nupstream: 25.12.5\nartifacts: official\n",
+		"lines/25.12/line.yaml": "id: \"25.12\"\nopenwrt_version: 25.12.5\nartifacts: official\n",
 		"lines/25.12-mtk/line.yaml": `
 id: 25.12-mtk
-upstream: 25.12.5
+openwrt_version: 25.12.5
 artifacts: self
 source:
   repo: https://github.com/openwrt/openwrt
@@ -118,7 +118,7 @@ func TestFingerprintsAreLayered(t *testing.T) {
 		{
 			name: "改 line.yaml 本身",
 			mutate: func(t *testing.T, root string) {
-				write(t, root, "lines/25.12/line.yaml", "id: \"25.12\"\nupstream: 25.12.6\nartifacts: official\n")
+				write(t, root, "lines/25.12/line.yaml", "id: \"25.12\"\nopenwrt_version: 25.12.6\nartifacts: official\n")
 			},
 			changedLine:    []string{"router@25.12", "vm@25.12"},
 			changedFeed:    []string{"router@25.12", "vm@25.12"},

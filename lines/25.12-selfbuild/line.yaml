@@ -10,12 +10,12 @@ description: 官方 v25.12.5 源码自编，用于验证自建工具链链路
 
 # L3 社区 feed 仍借官方同版本线，必须与 source 属于同一条版本线，
 # 否则借来的 luci/packages 与自编 libc 对不上。
-upstream: 25.12.5
+openwrt_version: 25.12.5
 artifacts: self
 
 source:
   repo: https://github.com/openwrt/openwrt
-  # ref 供人读，同时是离线核对「upstream 与源码同线」的唯一依据。
+  # ref 供人读，同时是离线核对「openwrt_version 与源码同线」的唯一依据。
   ref: v25.12.5
   # git ls-remote --tags https://github.com/openwrt/openwrt.git 'v25.12.5*'
   # v25.12.5 是带注解的 tag，下面是 ^{} 剥离后的提交对象。

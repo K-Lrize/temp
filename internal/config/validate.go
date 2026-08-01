@@ -11,9 +11,9 @@ var (
 	reIdent = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 	// 完整 patch 号。只写 25.12 会让「同一条版本线不同设备各自指向
 	// 25.12.4 / 25.12.5」这种漂移无法被发现。
-	reUpstream = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
-	reCommit   = regexp.MustCompile(`^[0-9a-f]{40}$`)
-	rePackage  = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._+-]*$`)
+	reOpenWrtVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
+	reCommit           = regexp.MustCompile(`^[0-9a-f]{40}$`)
+	rePackage          = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._+-]*$`)
 	// 从 ref 里认版本线：v25.12.5、openwrt-25.12、25.12 都能认出 25.12。
 	reRefVersion = regexp.MustCompile(`([0-9]+)\.([0-9]+)`)
 )
@@ -37,8 +37,8 @@ func (l Line) Validate() diag.Problems {
 	if !reIdent.MatchString(l.ID) {
 		ps = ps.Errorf("line.id", "id %q 非法：只允许小写字母、数字、点、连字符、下划线，且首字符为字母或数字", l.ID)
 	}
-	if !reUpstream.MatchString(l.Upstream) {
-		ps = ps.Errorf("line.upstream", "upstream %q 必须是完整 patch 号（如 25.12.5），不接受 25.12 这类让系统猜测的写法", l.Upstream)
+	if !reOpenWrtVersion.MatchString(l.OpenWrtVersion) {
+		ps = ps.Errorf("line.openwrt_version", "openwrt_version %q 必须是完整 patch 号（如 25.12.5），不接受 25.12 这类让系统猜测的写法", l.OpenWrtVersion)
 	}
 
 	switch l.Artifacts {
@@ -73,25 +73,25 @@ func (l Line) validateSource() diag.Problems {
 				"带注解的 tag 要取 ^{} 剥离后的提交对象", src.Commit)
 	}
 
-	// artifacts=self 时 L3 社区 feed 仍然借 upstream 那条线，两者必须同版本线，
-	// 否则借来的 luci/packages 与自编 libc 对不上。commit 无法离线核对，
-	// 只能用 ref 做这道检查——这是 ref 唯一的机器用途。
+	// artifacts=self 时 L3 社区 feed 仍然借 openwrt_version 那条线，两者必须
+	// 同版本线，否则借来的 luci/packages 与自编 libc 对不上。commit 无法离线
+	// 核对，只能用 ref 做这道检查——这是 ref 唯一的机器用途。
 	if src.Ref == "" {
-		ps = ps.Errorf("line.source.ref", "artifacts=self 时 source.ref 必填：它是离线核对「upstream 与源码是否同一条版本线」的唯一依据")
+		ps = ps.Errorf("line.source.ref", "artifacts=self 时 source.ref 必填：它是离线核对「openwrt_version 与源码是否同一条版本线」的唯一依据")
 		return ps
 	}
 	refLine := versionLine(src.Ref)
 	if refLine == "" {
-		ps = ps.Warnf("line.upstream-ref-unknown",
-			"source.ref %q 里没有版本号，无法核对它与 upstream %s 是否同一条版本线；"+
-				"跟踪 master 是合法的，但要自己确认借来的 L3 社区包与自编 libc 兼容", src.Ref, l.Upstream)
+		ps = ps.Warnf("line.openwrt_version-ref-unknown",
+			"source.ref %q 里没有版本号，无法核对它与 openwrt_version %s 是否同一条版本线；"+
+				"跟踪 master 是合法的，但要自己确认借来的 L3 社区包与自编 libc 兼容", src.Ref, l.OpenWrtVersion)
 		return ps
 	}
-	if up := versionLine(l.Upstream); up != "" && up != refLine {
-		ps = ps.Errorf("line.upstream-ref-mismatch",
-			"upstream %s（%s 线）与 source.ref %s（%s 线）不是同一条版本线："+
-				"L3 社区 feed 借 upstream，自编 libc 来自 source，两者错线会在设备上表现为依赖装不上",
-			l.Upstream, up, src.Ref, refLine)
+	if up := versionLine(l.OpenWrtVersion); up != "" && up != refLine {
+		ps = ps.Errorf("line.openwrt_version-ref-mismatch",
+			"openwrt_version %s（%s 线）与 source.ref %s（%s 线）不是同一条版本线："+
+				"L3 社区 feed 借 openwrt_version，自编 libc 来自 source，两者错线会在设备上表现为依赖装不上",
+			l.OpenWrtVersion, up, src.Ref, refLine)
 	}
 	return ps
 }

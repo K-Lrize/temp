@@ -1,15 +1,20 @@
 // Package files 组装设备的 rootfs overlay。
 //
-// 「合并文件层」与「执行构建期钩子」是一件事而不是两件：它们必须按固定顺序
-// 发生（钩子加工的正是刚合并出来的那棵树），拆成两个入口只会让每个调用方都
+// 「合并文件层」与「执行构建期脚本」是一件事而不是两件：它们必须按固定顺序
+// 发生（脚本加工的正是刚合并出来的那棵树），拆成两个入口只会让每个调用方都
 // 得记得配对调用，忘一次就产出一份少了内容却看着正常的固件。
 //
 // 两类「脚本」不要混淆：
 //   - 运行时脚本（etc/uci-defaults/*）：内容是 shell，但以**文件**形式打进
 //     固件，设备开机时执行。归 overlay 层，这里只当普通文件复制——所以可
 //     执行位必须原样保留。
-//   - 构建期钩子（files-hooks/*.sh）：在构建机上执行，加工 overlay 本身
-//     （例如按需拉 zsh 插件）。由本包执行，可读下面注入的 WRT_* 变量。
+//   - 构建期脚本（files-gen/*.sh）：在构建机上执行，对刚合并出来的 overlay
+//     做纯加工（生成文件、改权限、按模板展开）。它是一个哑执行器——只知道
+//     overlay 目录在哪，不知道自己在给哪个 variant 干活。
+//
+// 要往 rootfs 放「有版本、要追更新」的第三方代码（如 zsh 插件），走 feed/apk，
+// 不要在这里 fetch——构建期拉取会绕过内容寻址，plan 看不见它的变化，会一边
+// 报「无需重建」一边让固件内容悄悄漂移。
 package files
 
 import (
@@ -28,19 +33,20 @@ import (
 
 const (
 	dirFiles = "files"
-	dirHooks = "files-hooks"
-	hookExt  = ".sh"
+	dirGen   = "files-gen"
+	genExt   = ".sh"
 )
 
-// Assemble 把有序的 overlay 层合并进 dest，然后按同样的顺序执行构建期钩子。
+// Assemble 把有序的 overlay 层合并进 dest，然后按同样的顺序执行 files-gen 脚本。
 //
 // 层序（后者覆盖前者同路径文件）：
 //
 //	<root>/files/                        所有设备共用
 //	<root>/devices/<device>/files/       本设备
 //
-// 钩子同序：`<root>/files-hooks/*.sh` 然后 `<root>/devices/<device>/files-hooks/*.sh`，
-// 各自按文件名字典序。
+// 脚本同序：`<root>/files-gen/*.sh` 然后 `<root>/devices/<device>/files-gen/*.sh`，
+// 各自按文件名字典序。执行时 cwd 为仓库根（脚本按相对路径读仓库内文件），
+// overlay 目录经 WRT_FILES_DIR 注入。
 //
 // dest 必须不存在或为空：就地叠加到有残留的目录，会把上一次构建的文件悄悄
 // 打进这次的固件。
@@ -63,12 +69,12 @@ func Assemble(root string, v resolve.Variant, dest string) error {
 		}
 	}
 
-	env := hookEnv(root, absDest, v)
+	env := genEnv(absDest)
 	for _, dir := range []string{
-		filepath.Join(root, dirHooks),
-		filepath.Join(deviceDir, dirHooks),
+		filepath.Join(root, dirGen),
+		filepath.Join(deviceDir, dirGen),
 	} {
-		if err := runHooks(root, dir, env); err != nil {
+		if err := runGen(root, dir, env); err != nil {
 			return err
 		}
 	}
@@ -88,34 +94,28 @@ func prepareDest(dest string) error {
 	return nil
 }
 
-// hookEnv 是注入给构建期钩子的事实。
+// genEnv 是注入给 files-gen 脚本的唯一事实：overlay 目录在哪。
 //
-// 一律加 WRT_ 前缀：DEVICE、PACKAGES 这类名字在 shell 环境里太通用，和
-// 上游脚本或 CI 注入的变量撞车时，症状是钩子按别人的值干活。
-func hookEnv(root, dest string, v resolve.Variant) []string {
-	return append(os.Environ(),
-		"WRT_ROOT="+root,
-		"WRT_FILES_DIR="+dest,
-		"WRT_VARIANT="+v.ID,
-		"WRT_DEVICE="+v.Device,
-		"WRT_LINE="+v.Line.ID,
-		// 钩子不该自己再解析一遍配置——包列表在这里已经合并好了。
-		"WRT_PACKAGES="+strings.Join(v.Packages, " "),
-	)
+// 刻意只给这一个。脚本一旦要读 variant / device / 包列表来做分支，那就是在做
+// 本该在 Go / config 里做的决定——把上下文砍到只剩「往哪写」，这个口子就焊死。
+// 仓库根不进环境：cmd.Dir 已经是它，脚本按相对路径读即可。加 WRT_ 前缀是因为
+// FILES_DIR 这类名字在 shell 环境里太通用，容易和上游脚本或 CI 注入的变量撞车。
+func genEnv(dest string) []string {
+	return append(os.Environ(), "WRT_FILES_DIR="+dest)
 }
 
-func runHooks(root, dir string, env []string) error {
+func runGen(root, dir string, env []string) error {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("读取钩子目录 %s: %w", dir, err)
+		return fmt.Errorf("读取 files-gen 目录 %s: %w", dir, err)
 	}
 
 	var scripts []string
 	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), hookExt) {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), genExt) {
 			scripts = append(scripts, e.Name())
 		}
 	}
@@ -123,15 +123,15 @@ func runHooks(root, dir string, env []string) error {
 
 	for _, name := range scripts {
 		path := filepath.Join(dir, name)
-		// 显式用 bash 跑而不依赖 shebang 与可执行位：钩子从 git 检出后
-		// 权限位在不同平台上未必一致，靠它决定跑不跑会时灵时不灵。
+		// 显式用 bash 跑而不依赖 shebang 与可执行位：脚本从 git 检出后权限位
+		// 在不同平台上未必一致，靠它决定跑不跑会时灵时不灵。
 		cmd := exec.Command("bash", path)
 		cmd.Dir = root
 		cmd.Env = env
-		cmd.Stdout = os.Stderr // 钩子的输出是构建日志，不能污染 stdout 上的 JSON
+		cmd.Stdout = os.Stderr // 脚本的输出是构建日志，不能污染 stdout 上的 JSON
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("构建期钩子 %s 失败: %w", name, err)
+			return fmt.Errorf("files-gen 脚本 %s 失败: %w", name, err)
 		}
 	}
 	return nil

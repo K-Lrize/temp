@@ -19,9 +19,9 @@ func variant(line string, artifacts config.Artifacts, extra ...string) resolve.V
 		ID:     "mt3600be@" + line,
 		Device: "mt3600be",
 		Line: resolve.LineFacts{
-			ID:        line,
-			Upstream:  "25.12.5",
-			Artifacts: artifacts,
+			ID:               line,
+			OpenWrtVersion: "25.12.5",
+			Artifacts:        artifacts,
 		},
 		Hardware: config.Hardware{
 			Target:    "mediatek",
@@ -46,7 +46,7 @@ func assemble(t *testing.T, v resolve.Variant, opt Options) Repos {
 	return r
 }
 
-func TestOfficialLineBorrowsUpstreamForKernelLayers(t *testing.T) {
+func TestOfficialLineBorrowsOpenWrtVersionForKernelLayers(t *testing.T) {
 	r := assemble(t, variant("25.12", config.ArtifactsOfficial), defaultOptions())
 
 	want := []string{

@@ -25,7 +25,7 @@ lines/<id>/line.yaml          源码基线 + 产物身份（overlay/ patches/ co
 devices/<name>/device.yaml    硬件事实 + 装什么包 + 出货到哪几条 line
 sets/<name>.yaml              可复用的包清单
 files/                        所有设备共用的 rootfs overlay
-files-hooks/                  组装 overlay 时执行的构建期脚本
+files-gen/                    合并后加工 overlay 的构建期脚本（哑执行器，不 fetch）
 feed/                         自有软件包源码 + pin 到 commit 的外部 feed
 cmd/ internal/                wrt 本体
 ```

@@ -29,7 +29,7 @@ type Source struct {
 	// Commit 是唯一权威。tag 理论上不可变，但只信 commit 才能保证
 	// 「这次构建到底编了哪个源码状态」是可回答、可复现的。
 	Commit string `yaml:"commit" json:"commit"`
-	// Ref 供人读，CI 不用它检出。唯一的机器用途是核对 upstream 与源码
+	// Ref 供人读，CI 不用它检出。唯一的机器用途是核对 openwrt_version 与源码
 	// 是否属于同一条版本线（见 Line.Validate）。
 	Ref string `yaml:"ref,omitempty" json:"ref,omitempty"`
 }
@@ -45,11 +45,12 @@ type Source struct {
 type Line struct {
 	ID          string `yaml:"id"`
 	Description string `yaml:"description,omitempty"`
-	// Upstream 是完整 patch 号（如 25.12.5），不允许只写 25.12 让系统猜。
-	// L3 社区 feed 借的就是这条线。
-	Upstream  string    `yaml:"upstream"`
-	Artifacts Artifacts `yaml:"artifacts"`
-	Source    *Source   `yaml:"source,omitempty"`
+	// OpenWrtVersion 是完整 patch 号（如 25.12.5），不允许只写 25.12 让系统猜。
+	// L3 社区 feed 永远借这条线；artifacts=official 时 L2 也借它；artifacts=self
+	// 时它转为 source 的版本线核对锚点（见 validateSource）。
+	OpenWrtVersion string    `yaml:"openwrt_version"`
+	Artifacts        Artifacts `yaml:"artifacts"`
+	Source           *Source   `yaml:"source,omitempty"`
 
 	// RequiresBuild 是派生结论：lines/<id>/ 下 overlay、patches、config 任一非空，
 	// 即代表源码相对官方有实质修改。由载入层按磁盘事实填，不可从 YAML 写入

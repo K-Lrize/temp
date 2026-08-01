@@ -48,12 +48,12 @@ type PackagesEntry struct {
 	Arch string `json:"arch"`
 	// SDKTarget 决定用哪套 SDK 来编。同 arch 即同 ABI，用哪个 target 的 SDK
 	// 都行，但必须是确定的选择——见 pickSDKTarget。
-	SDKTarget   string           `json:"sdk_target"`
-	Artifacts   config.Artifacts `json:"artifacts"`
-	Upstream    string           `json:"upstream"`
-	Commit      string           `json:"commit,omitempty"`
-	Fingerprint string           `json:"fingerprint"`
-	NeedsBuild  bool             `json:"needs_build"`
+	SDKTarget        string           `json:"sdk_target"`
+	Artifacts        config.Artifacts `json:"artifacts"`
+	OpenWrtVersion string           `json:"openwrt_version"`
+	Commit           string           `json:"commit,omitempty"`
+	Fingerprint      string           `json:"fingerprint"`
+	NeedsBuild       bool             `json:"needs_build"`
 }
 
 // FirmwareEntry 是一次固件组装，一个 variant 一条。
@@ -164,12 +164,12 @@ func packagesMatrix(variants []resolve.Variant, fps map[string]Fingerprints, rem
 		if !seen {
 			fp := fps[v.ID]
 			entry = PackagesEntry{
-				Line:        v.Line.ID,
-				Arch:        v.Hardware.Arch,
-				SDKTarget:   v.Hardware.TargetKey(),
-				Artifacts:   v.Line.Artifacts,
-				Upstream:    v.Line.Upstream,
-				Fingerprint: fp.Feed,
+				Line:             v.Line.ID,
+				Arch:             v.Hardware.Arch,
+				SDKTarget:        v.Hardware.TargetKey(),
+				Artifacts:        v.Line.Artifacts,
+				OpenWrtVersion: v.Line.OpenWrtVersion,
+				Fingerprint:      fp.Feed,
 			}
 			if v.Line.Source != nil {
 				entry.Commit = v.Line.Source.Commit

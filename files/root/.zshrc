@@ -13,7 +13,9 @@ PROMPT='%F{green}%m%f %(?|%F{green}➜ %f|%F{red}➜ %f) %F{cyan}%c%f '
 
 alias c='clear'
 
-# 加载历史命令提示
-source ~/.zsh/zsh-autosuggestions/zsh-autosuggestions.zsh
-# 命令高亮
-source ~/.zsh/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+# 历史命令提示（zsh-autosuggestions 包提供，装了才加载）
+[ -r /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh ] && \
+    source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+# 命令高亮（zsh-syntax-highlighting 包提供，装了才加载）
+[ -r /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ] && \
+    source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh

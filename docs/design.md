@@ -47,23 +47,27 @@ OpenWrt 官方的 release channel（snapshot / 23.05 / 25.12）混淆 —— `25
 ```
 L1 自有业务包   r2://<line>/packages/<arch>/                        用户态，滚动，只增不删
 L2 内核与底座   r2://<line>/targets/<t>/<s>/{builds,kmods,packages}/  vermagic 锁定
-L3 官方社区源   https://downloads.openwrt.org/releases/<upstream>/    luci/base/routing/... 全量借用
+L3 官方社区源   https://downloads.openwrt.org/releases/<openwrt_version>/    luci/base/routing/... 全量借用
 ```
+
+> 注：L2 的 target base 包（libc/kernel/fstools）与 L3 里那个字面上就叫 `base` 的社区
+> feed 分类是两个不相关的东西，只是撞了名字——前者受下面的 `artifacts` 开关控制，
+> 后者无论哪种 `artifacts` 都永远借官方（见 §5.2）。
 
 `artifacts` 一个开关决定 L2 整层的来源：
 
 ```yaml
-artifacts: official   # SDK/IB + kmod + base 全部借官方
-artifacts: self       # SDK/IB + kmod + base 全部自己编
+artifacts: official   # SDK/IB + kmod + target base 全部借官方
+artifacts: self       # SDK/IB + kmod + target base 全部自己编
 ```
 
 取代旧的 `mode` + `kmod_source` 两字段。旧设计的四格矩阵里只有对角线能工作，另两格各自
 坏在不同地方且都只在刷机后暴露（`official+self` 路径不存在 → 设备 `apk update` 404；
 `self+official` 固件能刷但 vermagic 对不上、驱动装不上），所以它本来就是一个布尔值。
 
-L3 无论哪种都借官方，按 `upstream` 键控。**硬约束**：`artifacts: self` 时 `upstream`
-必须与 `source.commit` 属于同一条版本线，否则借来的 luci/packages 与自编 libc 对不上。
-这条进 `Validate()`。
+L3 无论哪种都借官方，按 `openwrt_version` 键控。**硬约束**：`artifacts: self` 时
+`openwrt_version` 必须与 `source.commit` 属于同一条版本线，否则借来的 luci/packages
+与自编 libc 对不上。这条进 `Validate()`。
 
 ---
 
@@ -83,7 +87,7 @@ devices/<name>/
 └── files/                    本设备的 rootfs overlay
 
 files/                        所有设备共用的 rootfs overlay（合并时排在设备层之前）
-files-hooks/                  组装 overlay 时执行的构建期脚本（如按需拉 zsh 插件）
+files-gen/                    合并后加工 overlay 的构建期脚本（生成/改权限/展开模板）
 
 sets/<name>.yaml              包集
 
@@ -101,15 +105,16 @@ rootfs overlay 与包清单一样是**有序层**：`files/` 在前，`devices/<
 # lines/25.12-mtk/line.yaml
 id: 25.12-mtk
 description: 基于 25.12.5，带 mediatek PHY 补丁
-upstream: 25.12.5             # L3 社区 feed 借这条线
+openwrt_version: 25.12.5    # L3 社区 feed 永远借这条线；artifacts:official 时 L2 也借它
 artifacts: self               # official | self
 source:                       # artifacts: self 时必填
   repo: https://github.com/openwrt/openwrt
   commit: f0a60eee2fe051741c643ea6118718aae1ef17fb
-  ref: v25.12.5               # 只供人读，CI 不使用
+  ref: v25.12.5               # 只供人读，CI 检出永远用 commit；唯一的机器用途是 lint 阶段
+                               # 核对它与 openwrt_version 是否同一条版本线
 ```
 
-`upstream` 只填完整 patch 号（`25.12.5`），域名由代码统一拼 —— 目的是杜绝"同一条版本线
+`openwrt_version` 只填完整 patch 号（`25.12.5`），域名由代码统一拼 —— 目的是杜绝"同一条版本线
 不同设备各自指向 25.12.4 / 25.12.5"这种漂移。
 
 `requires_build`（`overlay/` `patches/` `config/` 任一非空）是派生值，不是字段。
@@ -233,8 +238,8 @@ r2://<bucket>/
         └── *.img.gz, *.manifest, manifest.json, resolved.json, sha256sums(.sig)
 ```
 
-**为什么 SDK/IB 不可变而 kmod/base 覆盖式**：SDK/IB 只被 CI 自己消费，搬进
-`builds/<build-id>/` 换来"回滚 = 把 `current.json` 指回另一个 build-id"；kmod/base
+**为什么 SDK/IB 不可变而 kmod/target-base 覆盖式**：SDK/IB 只被 CI 自己消费，搬进
+`builds/<build-id>/` 换来"回滚 = 把 `current.json` 指回另一个 build-id"；kmod/target-base
 是已刷机设备固化的 URL，搬进 build-id 之下会让在线更新失效，所以它们靠引用计数 GC
 而非不可变性管理生命周期。
 
@@ -279,10 +284,10 @@ wrt resolve mt3600be@25.12-mtk
 
 ```
 L1  <repo_base>/<line>/packages/<arch>/packages.adb
-L2  kmod:  artifacts=self ? <repo_base>/<line>/... : <upstream_base>/...
-           .../targets/<t>/<s>/kmods/<vermagic>/packages.adb
-    base:  同上判定
-           .../targets/<t>/<s>/packages/packages.adb
+L2  kmod:         artifacts=self ? <repo_base>/<line>/... : <upstream_base>/...
+                  .../targets/<t>/<s>/kmods/<vermagic>/packages.adb
+    target base:  同上判定
+                  .../targets/<t>/<s>/packages/packages.adb
 L3  <upstream_base>/packages/<arch>/{base,luci,packages,routing,telephony}/packages.adb
 extra  device.repos[]
 ```
@@ -321,7 +326,7 @@ internal/
 ├── config/      types.go = schema = 唯一校验点；load.go；validate.go；packages.go  ✓
 ├── resolve/     device × line → Variant                                            ✓
 ├── repos/       三层 URL 装配（纯函数）                                              ✓
-├── files/       rootfs overlay 组装 + 构建期钩子                                     ✓
+├── files/       rootfs overlay 组装 + files-gen 脚本执行                             ✓
 ├── plan/        指纹计算 + 远端比对 → 三矩阵                                          ✓
 ├── artifacts/   R2 路径规则 + build/current/manifest/latest 类型（只有类型，无 I/O）  ✓
 ├── diag/        全仓库共用的诊断类型                                                  ✓
@@ -349,7 +354,7 @@ wrt lint                                   全部配置校验（结构 + 语义 
 wrt resolve <variant>|--all                打印 Variant JSON                                                  ✓
 wrt plan [--repo-base URL] [--all]         三矩阵                                            ✓
 wrt repos <variant> --vermagic X --repo-base Y [--local-l1 PATH]                             ✓
-wrt files <variant> <dest>                 组装 files overlay（合并文件层 + 跑构建期钩子）  ✓
+wrt files <variant> <dest>                 组装 files overlay（合并文件层 + 跑 files-gen 脚本）  ✓
 wrt src prepare --line X --target t/s      clone@commit → overlay → quilt → .config → 符号存活校验
 wrt src export --line X                    内核改动写回 lines/<id>/overlay/
 wrt meta build|current|manifest|latest     生成元数据 JSON
@@ -409,7 +414,7 @@ commit 分桶意味着每个 commit 写一份新的 2–3G 缓存，几个 commi
 | --- | --- |
 | 磁盘预检（全量编译前 ≥ 25GiB） | 编到一半 ENOSPC |
 | `.config` 符号存活断言 | `make defconfig` 静默丢弃依赖不满足的符号 |
-| 产物形状断言（SDK/IB 归档、kmod/base 数量非零、两份索引齐全、kmod 数相对上次下降超阈值） | `IGNORE_ERRORS="n m"` 放过的失败产出残缺产物 |
+| 产物形状断言（SDK/IB 归档、kmod/target-base 数量非零、两份索引齐全、kmod 数相对上次下降超阈值） | `IGNORE_ERRORS="n m"` 放过的失败产出残缺产物 |
 | 签名 `REQUIRE_KEY=1` | 静默发布未签名产物 |
 | 上游归档强制校验 `sha256sums` | 上游被投毒 / 下载截断 |
 | manifest 回归门禁（与上一个 release 比，有包**消失**即 fail） | IB 阶段条件依赖失效那类坑 |
@@ -481,7 +486,7 @@ APK 版本号规则（旧仓库 `docs/reference/apk-versioning.md` 的沉淀）*
 - set 的 remove 参与合并；add 与 remove 冲突必须报错
 - include 顺序影响最终包列表顺序
 - requires_build && artifacts:official → lint 报错
-- artifacts:self 且 upstream 与 source 版本线不符 → lint 报错
+- artifacts:self 且 openwrt_version 与 source 版本线不符 → lint 报错
 - 改一个未被任何设备 include 的 set，不改变任何 variant 指纹
 ```
 
@@ -522,7 +527,7 @@ APK 版本号规则（旧仓库 `docs/reference/apk-versioning.md` 的沉淀）*
 | **M0** ✓ | 仓库骨架；`config` 类型 + `Validate()`；`wrt lint` / `resolve`；sets 拆分 | ✓ 对同一份配置，`wrt resolve` 与旧仓库 `expected/resolved.json` 语义等价（`TestMigrationPreservesPackageSets` 逐包核对 124 项） |
 | **M1** ✓ | `repos` / `files` / `plan` + 纯函数单测 | ✓ 判定逻辑已就位并有离线测试覆盖；「无变更时三个矩阵为空」要等 M2 真的往 R2 发布之后才能端到端验证 |
 | **M2** | `artifacts` / `publish` / `meta`；`release.yml` + `_firmware.yml`；先跑通 `artifacts: official` 的 vm-armsr | 一次 push 产出一份可刷的固件，落到新 R2 布局 |
-| **M3** | `_toolchain.yml` + `wrt src prepare/export`；跑通 `artifacts: self` | **自建 SDK/IB 落地**；`25.12-selfbuild` line 产出可用的 SDK/IB/kmod/base |
+| **M3** | `_toolchain.yml` + `wrt src prepare/export`；跑通 `artifacts: self` | **自建 SDK/IB 落地**；`25.12-selfbuild` line 产出可用的 SDK/IB/kmod/target-base |
 | **M4** | `gc` + `verify` + qemu 冒烟 + PR 门禁 `ci.yml` | qemu 里 `apk update` 无 UNTRUSTED |
 | **M5** | mt3600be 接入；`25.12-mtk` line + 第一个内核补丁 | 一台设备两条线并行出货 |
 
@@ -544,7 +549,7 @@ M3 是这次重构真正的目的地 —— 前面几步都是为了让"自己�
 | `internal/resolve` | device × line → variant | 90.7% |
 | `internal/feed` | 自有包 Makefile 校验 | 97.3% |
 | `internal/repos` | 三层软件源装配 | 100% |
-| `internal/files` | overlay 有序层合并 + 构建期钩子 | 81.0% |
+| `internal/files` | overlay 有序层合并 + files-gen 脚本执行 | 81.0% |
 | `internal/plan` | 三层指纹 + 三矩阵 + 远端比对 | 86.8% |
 | `internal/artifacts` | R2 路径规则与元数据类型（只有类型，无 I/O） | 76.9% |
 
@@ -552,9 +557,13 @@ CLI：`wrt lint | resolve | plan | repos | files`（`go test -race ./...` 全绿
 
 ### 实现期定下、初稿里没有的约定
 
-- **rootfs overlay 两层** —— 仓库根 `files/` + `devices/<name>/files/`，构建期钩子落
-  `files-hooks/`；钩子环境变量统一加 `WRT_` 前缀（`DEVICE`、`PACKAGES` 这类名字在
-  shell 环境里太通用，与 CI 或上游脚本撞车时症状是钩子按别人的值干活）。
+- **rootfs overlay 两层** —— 仓库根 `files/` + `devices/<name>/files/`，合并后的加工
+  脚本落 `files-gen/`（同样两层）。脚本是**哑执行器**：只注入 `WRT_FILES_DIR`
+  （overlay 目录，加 `WRT_` 前缀避免与 shell 通用名撞车），cwd 为仓库根按相对路径
+  读输入，**拿不到 variant / 包列表**——要按这些做分支就是在做本该在 Go 里做的
+  决定。**不在脚本里 fetch 外部东西**：要往 rootfs 放「有版本、要追更新」的第三方
+  代码（如 zsh 插件），打成 `feed/` 的 apk，由 `PKG_HASH` 钉死、走 feed 指纹，
+  而不是构建期拉取绕过内容寻址。
 - **golden 基线放在产出它的包旁边**（`internal/resolve/testdata/`），不集中到仓库根。
 - **`internal/artifacts` 提前到 M1** —— plan 的远端比对需要读 R2 上那几份元数据，
   与将来发布侧共用一份定义，避免两边各写一遍再漂移。目前只有类型与路径，没有 I/O。

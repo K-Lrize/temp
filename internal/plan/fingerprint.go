@@ -94,10 +94,10 @@ func (c *Computer) For(cfg *config.Config, v resolve.Variant) (Fingerprints, err
 	paths := []string{
 		path.Join(deviceDir, "device.yaml"),
 		path.Join(deviceDir, "files"),
-		path.Join(deviceDir, "files-hooks"),
-		// 仓库根的 overlay 层与钩子对所有设备生效
+		path.Join(deviceDir, "files-gen"),
+		// 仓库根的 overlay 层与构建期脚本对所有设备生效
 		"files",
-		"files-hooks",
+		"files-gen",
 	}
 	for _, setName := range device.Packages.Include {
 		paths = append(paths, path.Join("sets", setName+".yaml"))

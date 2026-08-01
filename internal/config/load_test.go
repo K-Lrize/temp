@@ -34,12 +34,12 @@ func writeTree(t *testing.T, files map[string]string) string {
 const (
 	yamlLineOfficial = `
 id: "25.12"
-upstream: 25.12.5
+openwrt_version: 25.12.5
 artifacts: official
 `
 	yamlLineSelf = `
 id: 25.12-selfbuild
-upstream: 25.12.5
+openwrt_version: 25.12.5
 artifacts: self
 source:
   repo: https://github.com/openwrt/openwrt
@@ -228,7 +228,7 @@ func TestLoadWarnsOnUnreferencedConfig(t *testing.T) {
 
 func TestLoadStampsSourcePath(t *testing.T) {
 	files := goodTree()
-	files["lines/25.12/line.yaml"] = "id: \"25.12\"\nupstream: bogus\nartifacts: official\n"
+	files["lines/25.12/line.yaml"] = "id: \"25.12\"\nopenwrt_version: bogus\nartifacts: official\n"
 	_, ps := loadTree(t, files)
 	for _, p := range ps {
 		if p.Source == "" {

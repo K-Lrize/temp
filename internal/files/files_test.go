@@ -14,7 +14,7 @@ func testVariant() resolve.Variant {
 	return resolve.Variant{
 		ID:     "mt3600be@25.12",
 		Device: "mt3600be",
-		Line:   resolve.LineFacts{ID: "25.12", Upstream: "25.12.5", Artifacts: config.ArtifactsOfficial},
+		Line:   resolve.LineFacts{ID: "25.12", OpenWrtVersion: "25.12.5", Artifacts: config.ArtifactsOfficial},
 		Hardware: config.Hardware{
 			Target: "mediatek", Subtarget: "filogic",
 			Profile: "glinet_gl-mt3600be", Arch: "aarch64_cortex-a53",
@@ -138,13 +138,13 @@ func TestNonEmptyDestIsRejected(t *testing.T) {
 	}
 }
 
-func TestHooksRunInOrderAfterFilesAreInPlace(t *testing.T) {
+func TestGenScriptsRunInOrderAfterFilesAreInPlace(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "files/etc/banner"), "hi\n", 0o644)
-	// 钩子按字典序执行，且执行时 overlay 已经就位——钩子的职责正是加工它。
-	writeFile(t, filepath.Join(root, "files-hooks/20-second.sh"),
+	// 脚本按字典序执行，且执行时 overlay 已经就位——脚本的职责正是加工它。
+	writeFile(t, filepath.Join(root, "files-gen/20-second.sh"),
 		"#!/usr/bin/env bash\necho -n second >> \"$WRT_FILES_DIR/order\"\n", 0o755)
-	writeFile(t, filepath.Join(root, "files-hooks/10-first.sh"),
+	writeFile(t, filepath.Join(root, "files-gen/10-first.sh"),
 		"#!/usr/bin/env bash\ntest -f \"$WRT_FILES_DIR/etc/banner\" || exit 1\necho -n first >> \"$WRT_FILES_DIR/order\"\n", 0o755)
 
 	dest := filepath.Join(t.TempDir(), "overlay")
@@ -156,11 +156,11 @@ func TestHooksRunInOrderAfterFilesAreInPlace(t *testing.T) {
 	}
 }
 
-func TestDeviceHooksRunAfterCommonHooks(t *testing.T) {
+func TestDeviceGenScriptsRunAfterCommonOnes(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "files-hooks/a.sh"),
+	writeFile(t, filepath.Join(root, "files-gen/a.sh"),
 		"#!/usr/bin/env bash\necho -n common >> \"$WRT_FILES_DIR/order\"\n", 0o755)
-	writeFile(t, filepath.Join(root, "devices/mt3600be/files-hooks/a.sh"),
+	writeFile(t, filepath.Join(root, "devices/mt3600be/files-gen/a.sh"),
 		"#!/usr/bin/env bash\necho -n device >> \"$WRT_FILES_DIR/order\"\n", 0o755)
 
 	dest := filepath.Join(t.TempDir(), "overlay")
@@ -172,16 +172,16 @@ func TestDeviceHooksRunAfterCommonHooks(t *testing.T) {
 	}
 }
 
-func TestHooksSeeVariantFacts(t *testing.T) {
-	// 钩子不该自己再去解析一遍配置——包列表与 variant 身份由这里注入。
+func TestGenScriptsOnlyGetOverlayDir(t *testing.T) {
+	// files-gen 是哑执行器：只拿到 overlay 目录，拿不到 variant 上下文。
+	// 要读配置做分支的活不属于这里——那是 Go / config 的活。
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "files-hooks/dump.sh"), `#!/usr/bin/env bash
+	writeFile(t, filepath.Join(root, "files-gen/dump.sh"), `#!/usr/bin/env bash
 {
-  echo "variant=$WRT_VARIANT"
-  echo "device=$WRT_DEVICE"
-  echo "line=$WRT_LINE"
-  echo "packages=$WRT_PACKAGES"
-  echo "root=$WRT_ROOT"
+  echo "files_dir=$WRT_FILES_DIR"
+  echo "variant=${WRT_VARIANT:-<unset>}"
+  echo "device=${WRT_DEVICE:-<unset>}"
+  echo "packages=${WRT_PACKAGES:-<unset>}"
 } > "$WRT_FILES_DIR/env"
 `, 0o755)
 
@@ -191,40 +191,38 @@ func TestHooksSeeVariantFacts(t *testing.T) {
 	}
 
 	got := read(t, filepath.Join(dest, "env"))
-	for _, want := range []string{
-		"variant=mt3600be@25.12",
-		"device=mt3600be",
-		"line=25.12",
-		"packages=zsh luci -dnsmasq",
-		"root=" + root,
-	} {
+	if !strings.Contains(got, "files_dir="+dest) {
+		t.Errorf("WRT_FILES_DIR 应指向 overlay 目录:\n%s", got)
+	}
+	// variant / device / 包列表不该被注入——注入它们就是在邀请脚本做决定。
+	for _, want := range []string{"variant=<unset>", "device=<unset>", "packages=<unset>"} {
 		if !strings.Contains(got, want) {
-			t.Errorf("缺少 %q：\n%s", want, got)
+			t.Errorf("variant 上下文不该出现在 files-gen 环境里，缺少 %q:\n%s", want, got)
 		}
 	}
 }
 
-func TestFailingHookAbortsAssembly(t *testing.T) {
-	// 钩子失败被吞掉，会产出一份少了内容却看着正常的 overlay。
+func TestFailingGenScriptAbortsAssembly(t *testing.T) {
+	// 脚本失败被吞掉，会产出一份少了内容却看着正常的 overlay。
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "files-hooks/boom.sh"),
+	writeFile(t, filepath.Join(root, "files-gen/boom.sh"),
 		"#!/usr/bin/env bash\necho 出错了 >&2\nexit 3\n", 0o755)
 
 	dest := filepath.Join(t.TempDir(), "overlay")
 	err := Assemble(root, testVariant(), dest)
 	if err == nil {
-		t.Fatal("钩子失败必须中断组装")
+		t.Fatal("脚本失败必须中断组装")
 	}
 	if !strings.Contains(err.Error(), "boom.sh") {
-		t.Errorf("错误信息要点名是哪个钩子: %v", err)
+		t.Errorf("错误信息要点名是哪个脚本: %v", err)
 	}
 }
 
-func TestNonShellFilesInHookDirAreIgnored(t *testing.T) {
+func TestNonShellFilesInGenDirAreIgnored(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "files-hooks/README.md"), "不是钩子\n", 0o644)
+	writeFile(t, filepath.Join(root, "files-gen/README.md"), "不是脚本\n", 0o644)
 	dest := filepath.Join(t.TempDir(), "overlay")
 	if err := Assemble(root, testVariant(), dest); err != nil {
-		t.Fatalf("钩子目录里的非 .sh 文件应当被忽略: %v", err)
+		t.Fatalf("files-gen 目录里的非 .sh 文件应当被忽略: %v", err)
 	}
 }

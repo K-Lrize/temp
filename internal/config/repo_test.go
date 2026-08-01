@@ -36,9 +36,19 @@ func TestRepositoryConfigIsValid(t *testing.T) {
 	}
 }
 
+// intentionalAdditions 登记相对旧仓库**有意**新增的包。迁移的默认要求是逐包
+// 一致，少数几处是这次重构刻意改的，在这里显式记下来（带原因），而不是去改
+// 基线文件——基线是旧仓库的历史快照，篡改它等于掩盖真实差异。
+var intentionalAdditions = map[string][]string{
+	// zsh 两个插件旧仓库靠构建期钩子拉成 overlay 文件；现在改由自有 feed 的
+	// apk 交付（feed/zsh-autosuggestions、feed/zsh-syntax-highlighting），于是
+	// 进了包列表。见 sets/dev-tools.yaml。
+	"mt3600be": {"zsh-autosuggestions", "zsh-syntax-highlighting"},
+}
+
 // TestMigrationPreservesPackageSets 是从 wrt-build 迁过来时唯一有意义的
 // 等价性检查：把 124 个硬列在一处的包拆进 11 个包集之后，每台设备最终
-// 装的东西必须与拆之前一模一样。
+// 装的东西必须与拆之前一模一样（intentionalAdditions 里显式登记的除外）。
 //
 // 比的是集合而不是顺序——包集重排本来就会改变顺序，而 ImageBuilder 的
 // PACKAGES 是无序的。基线取自旧仓库的 devices/*/expected/resolved.json。
@@ -50,7 +60,8 @@ func TestMigrationPreservesPackageSets(t *testing.T) {
 
 	for _, name := range cfg.SortedDeviceNames() {
 		t.Run(name, func(t *testing.T) {
-			baseline := readBaseline(t, name)
+			baseline := append(readBaseline(t, name), intentionalAdditions[name]...)
+			sort.Strings(baseline)
 			device := cfg.Devices[name]
 
 			layers := make([]Layer, 0, len(device.Packages.Include)+1)

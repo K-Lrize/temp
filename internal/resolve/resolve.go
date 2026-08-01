@@ -22,11 +22,11 @@ const Separator = "@"
 // 刻意复制而不是引用 config.Line：Variant 会被序列化成 JSON 随固件一起发布，
 // 「这份固件是用什么配置编出来的」必须能脱离仓库回答。
 type LineFacts struct {
-	ID            string           `json:"id"`
-	Upstream      string           `json:"upstream"`
-	Artifacts     config.Artifacts `json:"artifacts"`
-	RequiresBuild bool             `json:"requires_build"`
-	Source        *config.Source   `json:"source,omitempty"`
+	ID               string           `json:"id"`
+	OpenWrtVersion string           `json:"openwrt_version"`
+	Artifacts        config.Artifacts `json:"artifacts"`
+	RequiresBuild    bool             `json:"requires_build"`
+	Source           *config.Source   `json:"source,omitempty"`
 }
 
 // Variant 是 device × line 的展开结果，构建的最小单位。
@@ -148,11 +148,11 @@ func build(cfg *config.Config, device config.Device, lineID string) (Variant, di
 		ID:     MakeID(device.Name, lineID),
 		Device: device.Name,
 		Line: LineFacts{
-			ID:            line.ID,
-			Upstream:      line.Upstream,
-			Artifacts:     line.Artifacts,
-			RequiresBuild: line.RequiresBuild,
-			Source:        line.Source,
+			ID:               line.ID,
+			OpenWrtVersion: line.OpenWrtVersion,
+			Artifacts:        line.Artifacts,
+			RequiresBuild:    line.RequiresBuild,
+			Source:           line.Source,
 		},
 		Hardware:   device.Hardware,
 		Metadata:   device.Metadata,

@@ -42,7 +42,7 @@ func TestLintReportsEveryProblemAtOnce(t *testing.T) {
 	// 两个文件各有一处错，一次运行要全报出来——修一条跑一遍是上一代
 	// lint 最消耗人的地方。
 	root := t.TempDir()
-	write(t, root, "lines/25.12/line.yaml", "id: \"25.12\"\nupstream: nope\nartifacts: official\n")
+	write(t, root, "lines/25.12/line.yaml", "id: \"25.12\"\nopenwrt_version: nope\nartifacts: official\n")
 	write(t, root, "devices/vm/device.yaml", `
 name: vm
 hardware: {target: armsr, subtarget: armv8, profile: generic, arch: WRONG}
@@ -54,7 +54,7 @@ packages: {}
 	if err == nil {
 		t.Fatal("有错时 lint 必须返回非零")
 	}
-	for _, want := range []string{"line.upstream", "device.arch"} {
+	for _, want := range []string{"line.openwrt_version", "device.arch"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("输出里缺少规则 %q：\n%s", want, stdout)
 		}
@@ -64,7 +64,7 @@ packages: {}
 func TestLintPassesWithWarningsOnly(t *testing.T) {
 	// 只有 warn（这里是「line 没被任何设备引用」）不该阻断。
 	root := t.TempDir()
-	write(t, root, "lines/25.12/line.yaml", "id: \"25.12\"\nupstream: 25.12.5\nartifacts: official\n")
+	write(t, root, "lines/25.12/line.yaml", "id: \"25.12\"\nopenwrt_version: 25.12.5\nartifacts: official\n")
 
 	stdout, _, err := runCLI(t, "-C", root, "lint")
 	if err != nil {
@@ -208,7 +208,7 @@ func TestFilesAssemblesOverlay(t *testing.T) {
 	if _, _, err := runCLI(t, atRepo(t, "files", "vm-armsr@25.12", dest)...); err != nil {
 		t.Fatal(err)
 	}
-	// vm-armsr 不装 zsh，钩子会跳过；通用层的文件必须在。
+	// vm-armsr 没有 files-gen 脚本；通用层的文件必须在。
 	if _, err := os.Stat(filepath.Join(dest, "etc/uci-defaults/00-base")); err != nil {
 		t.Fatalf("通用层 overlay 没有落地: %v", err)
 	}

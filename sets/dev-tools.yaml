@@ -1,9 +1,11 @@
-# 上机排障用的顺手工具。装了 zsh 之后 files-hooks/prepare-zsh-plugins.sh
-# 会在组装 overlay 时拉插件。
+# 上机排障用的顺手工具。zsh 的两个插件走自有 feed 的 apk（feed/zsh-*），
+# ~/.zshrc 从 /usr/share/ 下加载它们。
 name: dev-tools
 description: 上机排障用的 shell、编辑器与网络工具
 add:
   - zsh
+  - zsh-autosuggestions
+  - zsh-syntax-highlighting
   - vim-full
   - tmux
   - ncdu

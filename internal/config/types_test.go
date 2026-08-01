@@ -8,14 +8,14 @@ import (
 const validCommit = "f0a60eee2fe051741c643ea6118718aae1ef17fb"
 
 func officialLine() Line {
-	return Line{ID: "25.12", Upstream: "25.12.5", Artifacts: ArtifactsOfficial}
+	return Line{ID: "25.12", OpenWrtVersion: "25.12.5", Artifacts: ArtifactsOfficial}
 }
 
 func selfLine() Line {
 	return Line{
-		ID:        "25.12-selfbuild",
-		Upstream:  "25.12.5",
-		Artifacts: ArtifactsSelf,
+		ID:               "25.12-selfbuild",
+		OpenWrtVersion: "25.12.5",
+		Artifacts:        ArtifactsSelf,
 		Source: &Source{
 			Repo:   "https://github.com/openwrt/openwrt",
 			Ref:    "v25.12.5",
@@ -37,8 +37,8 @@ func TestLineValidate(t *testing.T) {
 		{"id 含大写", func(l *Line) { l.ID = "25.12-MTK" }, []string{"line.id"}},
 		{"id 以连字符开头", func(l *Line) { l.ID = "-25.12" }, []string{"line.id"}},
 
-		{"upstream 为空", func(l *Line) { l.Upstream = "" }, []string{"line.upstream"}},
-		{"upstream 只写到次版本", func(l *Line) { l.Upstream = "25.12" }, []string{"line.upstream"}},
+		{"openwrt_version 为空", func(l *Line) { l.OpenWrtVersion = "" }, []string{"line.openwrt_version"}},
+		{"openwrt_version 只写到次版本", func(l *Line) { l.OpenWrtVersion = "25.12" }, []string{"line.openwrt_version"}},
 
 		{"artifacts 为空", func(l *Line) { l.Artifacts = "" }, []string{"line.artifacts"}},
 		{"artifacts 取值非法", func(l *Line) { l.Artifacts = "build" }, []string{"line.artifacts"}},
@@ -79,18 +79,18 @@ func TestLineValidate(t *testing.T) {
 			[]string{"line.source.ref"},
 		},
 
-		// artifacts=self 时 L3 社区 feed 仍借 upstream 那条线，两者版本线必须一致，
-		// 否则借来的 luci/packages 与自编 libc 对不上。commit 无法离线核对，
-		// 退而用只供人读的 ref 做这道检查。
+		// artifacts=self 时 L3 社区 feed 仍借 openwrt_version 那条线，两者版本线
+		// 必须一致，否则借来的 luci/packages 与自编 libc 对不上。commit 无法离线
+		// 核对，退而用只供人读的 ref 做这道检查。
 		{
-			"ref 与 upstream 不在同一条版本线",
-			func(l *Line) { *l = selfLine(); l.Upstream = "24.10.2" },
-			[]string{"line.upstream-ref-mismatch"},
+			"ref 与 openwrt_version 不在同一条版本线",
+			func(l *Line) { *l = selfLine(); l.OpenWrtVersion = "24.10.2" },
+			[]string{"line.openwrt_version-ref-mismatch"},
 		},
 		{
 			"ref 跟踪 master 时无法核对，降级为 warn",
 			func(l *Line) { *l = selfLine(); l.Source.Ref = "main" },
-			[]string{"line.upstream-ref-unknown"},
+			[]string{"line.openwrt_version-ref-unknown"},
 		},
 	}
 

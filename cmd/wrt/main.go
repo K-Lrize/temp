@@ -67,7 +67,7 @@ func commands() []command {
 		},
 		{
 			name:    "files",
-			summary: "组装设备的 rootfs overlay（合并文件层 + 跑构建期钩子）",
+			summary: "组装设备的 rootfs overlay（合并文件层 + 跑 files-gen 脚本）",
 			usage:   "wrt files <device>@<line> <dest>",
 			run:     runFiles,
 		},

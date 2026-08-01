@@ -36,12 +36,12 @@ func twoLineTree(t *testing.T) *config.Config {
 	return writeTree(t, map[string]string{
 		"lines/25.12/line.yaml": `
 id: "25.12"
-upstream: 25.12.5
+openwrt_version: 25.12.5
 artifacts: official
 `,
 		"lines/25.12-mtk/line.yaml": `
 id: 25.12-mtk
-upstream: 25.12.5
+openwrt_version: 25.12.5
 artifacts: self
 source:
   repo: https://github.com/openwrt/openwrt
@@ -118,8 +118,8 @@ func TestVariantCarriesLineFacts(t *testing.T) {
 	if self.Line.Source == nil || self.Line.Source.Commit == "" {
 		t.Fatal("自建线必须带上 source.commit——构建时只信它")
 	}
-	if self.Line.Upstream != "25.12.5" {
-		t.Errorf("upstream = %q", self.Line.Upstream)
+	if self.Line.OpenWrtVersion != "25.12.5" {
+		t.Errorf("openwrt_version = %q", self.Line.OpenWrtVersion)
 	}
 }
 
@@ -222,7 +222,7 @@ func TestCrossLayerPackageConflictSurfacesPerVariant(t *testing.T) {
 	cfg := writeTree(t, map[string]string{
 		"lines/25.12/line.yaml": `
 id: "25.12"
-upstream: 25.12.5
+openwrt_version: 25.12.5
 artifacts: official
 `,
 		"sets/router.yaml": `

@@ -28,6 +28,7 @@ jobs:
   plan:
     runs-on: ubuntu-24.04
     outputs:
+      toolchain: ${{ steps.plan.outputs.toolchain }}
       packages: ${{ steps.plan.outputs.packages }}
       firmware: ${{ steps.plan.outputs.firmware }}
       release_id: ${{ steps.plan.outputs.release_id }}
@@ -60,12 +61,33 @@ jobs:
 
           PLAN="$(./wrt plan --repo-base '${{ vars.R2_PUBLIC_URL }}')"
           echo "${PLAN}" | jq .
+          echo "toolchain=$(echo "${PLAN}" | jq -c '.toolchain')" >> "$GITHUB_OUTPUT"
           echo "packages=$(echo "${PLAN}" | jq -c '.packages')" >> "$GITHUB_OUTPUT"
           echo "firmware=$(echo "${PLAN}" | jq -c '.firmware')" >> "$GITHUB_OUTPUT"
 
-  packages:
+  toolchain:
     needs: plan
-    if: ${{ !cancelled() && needs.plan.outputs.packages != '[]' }}
+    if: ${{ !cancelled() && needs.plan.outputs.toolchain != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        t: ${{ fromJson(needs.plan.outputs.toolchain) }}
+    uses: ./.github/workflows/_toolchain.yml
+    with:
+      line: ${{ matrix.t.line }}
+      target: ${{ matrix.t.target }}
+      subtarget: ${{ matrix.t.subtarget }}
+      repo: ${{ matrix.t.repo }}
+      commit: ${{ matrix.t.commit }}
+      line_tree: ${{ matrix.t.line_tree }}
+    secrets: inherit
+
+  packages:
+    needs: [plan, toolchain]
+    # toolchain 先于 packages：self 线的自有包要用自建 SDK（toolchain 发到 R2 的
+    # builds/<id>/sdk-ib）。official 线不依赖它，但 job 级 needs 是粗粒度的——
+    # toolchain 空/被 skip 时 packages 照跑（!cancelled()），失败才拦。
+    if: ${{ !cancelled() && needs.toolchain.result != 'failure' && needs.plan.outputs.packages != '[]' }}
     strategy:
       fail-fast: false
       matrix:
@@ -99,8 +121,8 @@ jobs:
     secrets: inherit
 
   gc:
-    needs: [plan, packages, firmware]
-    if: ${{ !cancelled() && needs.packages.result != 'failure' && needs.firmware.result != 'failure' }}
+    needs: [plan, toolchain, packages, firmware]
+    if: ${{ !cancelled() && needs.toolchain.result != 'failure' && needs.packages.result != 'failure' && needs.firmware.result != 'failure' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

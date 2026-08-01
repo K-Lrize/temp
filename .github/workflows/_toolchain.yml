@@ -1,0 +1,271 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+#
+# 可复用 workflow：为单个 (line, target, subtarget) 全量编译自建工具链
+# （SDK / ImageBuilder / kmod 全集 / base 全集），签名索引后发布到 R2。
+# 只有 self 线需要它——official 线借官方成品，不进这条。步骤即编排：JSON 小票
+# 由 wrt 动词生成，vermagic 抠取 / 索引签名是 SDK 自带工具的活，留在 step 里。
+#
+# 这是 make world（含 CONFIG_ALL_KMODS=y），3~5 小时的全量编译，本地无从验证，
+# 忠实照搬 wrt-build 跑通过的那份 _toolchain.yml。产物寻址：
+#   builds/<build_id>/sdk-ib/   （不可变，仅 CI 消费）
+#   kmods/<vermagic>/           （L2，设备运行期依赖）
+#   packages/                   （L2 base，target 核心包 + kernel）
+#   build.json（builds/<build_id>/，不可变）  current.json（唯一可变指针，最后发）
+
+name: (internal) Build toolchain target
+
+on:
+  workflow_call:
+    inputs:
+      line:
+        required: true
+        type: string
+      target:
+        required: true
+        type: string
+      subtarget:
+        required: true
+        type: string
+      repo:
+        required: true
+        type: string
+      commit:
+        required: true
+        type: string
+      line_tree:
+        description: "plan 算好的 line 目录树指纹，写进 build.json 供人工排障"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  toolchain:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    concurrency:
+      group: publish-toolchain-${{ inputs.line }}-${{ inputs.target }}-${{ inputs.subtarget }}
+      cancel-in-progress: false
+    env:
+      WRT_S3_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+      WRT_S3_BUCKET: ${{ vars.R2_BUCKET }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      REPO_BASE: ${{ vars.R2_PUBLIC_URL }}
+      LINE: ${{ inputs.line }}
+      TARGET: ${{ inputs.target }}
+      SUBTARGET: ${{ inputs.subtarget }}
+      LINE_TREE: ${{ inputs.line_tree }}
+      UPSTREAM_COMMIT: ${{ inputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: wrt
+      - run: |
+          chmod +x wrt
+          echo "WRT=$PWD/wrt" >> "$GITHUB_ENV"
+
+      - name: 磁盘预检（make world 需 25GiB+）
+        run: |
+          avail=$(( $(df -Pk "$GITHUB_WORKSPACE" | awk 'NR==2{print $4}') / 1024 / 1024 ))
+          echo "可用 ${avail}GiB"
+          [ "$avail" -ge 25 ] || { echo "::error::磁盘不足 ${avail}GiB < 25GiB"; exit 1; }
+
+      - name: 安装构建依赖
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
+            gettext git libncurses-dev libssl-dev python3 python3-setuptools \
+            rsync unzip zlib1g-dev file wget zstd ccache
+
+      - name: ccache 分桶（按周）
+        id: ccache_bucket
+        run: echo "bucket=$(date -u +%Y-%W)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-tc-${{ inputs.target }}-${{ inputs.subtarget }}-${{ steps.ccache_bucket.outputs.bucket }}
+          restore-keys: ccache-tc-${{ inputs.target }}-${{ inputs.subtarget }}-
+
+      - name: 计算不可变 build_id
+        id: build_id
+        env:
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: echo "id=$(./wrt id build)" >> "$GITHUB_OUTPUT"
+
+      - name: 克隆 OpenWrt 源码（按 commit，不按 ref）
+        run: |
+          git init openwrt
+          cd openwrt
+          git remote add origin "${{ inputs.repo }}"
+          git fetch --depth 1 origin "${{ inputs.commit }}"
+          git checkout FETCH_HEAD
+
+      - name: 准备 apk 签名密钥
+        env:
+          APK_PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
+          APK_PUBLIC_KEY: ${{ secrets.APK_PUBLIC_KEY }}
+        run: |
+          [ -n "$APK_PRIVATE_KEY" ] || { echo "::error::缺 secrets.APK_PRIVATE_KEY"; exit 1; }
+          [ -n "$APK_PUBLIC_KEY" ]  || { echo "::error::缺 secrets.APK_PUBLIC_KEY"; exit 1; }
+          printf '%s\n' "$APK_PRIVATE_KEY" > openwrt/private-key.pem
+          printf '%s\n' "$APK_PUBLIC_KEY"  > openwrt/public-key.pem
+          chmod 600 openwrt/private-key.pem
+
+      - name: 注入自有 feed（wrt feeds）
+        run: |
+          "$WRT" feeds --sdk openwrt
+          cd openwrt
+          for i in 1 2 3; do ./scripts/feeds update -a && break || { echo "重试 $i"; sleep 5; }; done
+          ./scripts/feeds install -a -p custom_feed
+
+      - name: 生成 .config 并校验
+        working-directory: openwrt
+        run: |
+          {
+            echo "CONFIG_TARGET_${TARGET}=y"
+            echo "CONFIG_TARGET_${TARGET}_${SUBTARGET}=y"
+            echo "CONFIG_ALL_KMODS=y"
+            echo "CONFIG_INSTALL_LIBSTDCPP=y"
+            echo "CONFIG_INSTALL_LIBSSP=y"
+            echo "CONFIG_PACKAGE_libatomic=m"
+            echo "CONFIG_SDK=y"
+            echo "CONFIG_IB=y"
+            echo "# CONFIG_IB_STANDALONE is not set"
+            echo "CONFIG_SIGNED_PACKAGES=y"
+            echo "CONFIG_CCACHE=y"
+          } >> .config
+          make defconfig
+          # make defconfig 会静默丢弃依赖不满足的符号，逐条回读确认真的生效。
+          for sym in CONFIG_SDK=y CONFIG_IB=y CONFIG_ALL_KMODS=y CONFIG_SIGNED_PACKAGES=y; do
+            grep -q "^${sym}\$" .config || { echo "::error::${sym} 未生效（被 defconfig 丢弃）"; exit 1; }
+          done
+
+      - name: 全量编译（make world）
+        working-directory: openwrt
+        # IGNORE_ERRORS="n m"：只放过未选中(n)与模块(m)的失败，进 rootfs 的必需
+        # 包(y)失败仍直接 fail。完整性靠发布前的形状断言把关，不靠"任何包失败即整体
+        # 失败"——后者拦不住真残缺、又被上游偶发问题反复打断。
+        run: |
+          export CCACHE_DIR="$HOME/.ccache"
+          make -j"$(nproc)" world IGNORE_ERRORS="n m"
+
+      - name: 收集 SDK / IB
+        run: |
+          OUT="out/sdk-ib"
+          mkdir -p "$OUT"
+          cp openwrt/bin/targets/"$TARGET"/"$SUBTARGET"/openwrt-sdk-*.tar.* "$OUT/" 2>/dev/null || true
+          cp openwrt/bin/targets/"$TARGET"/"$SUBTARGET"/openwrt-imagebuilder-*.tar.* "$OUT/" 2>/dev/null || true
+          ( cd "$OUT" && sha256sum openwrt-*.tar.* > sha256sums 2>/dev/null || true )
+          ls -lh "$OUT"
+
+      - name: 抠 vermagic、拆分 kmod/base 并签名索引
+        id: kmod_meta
+        run: |
+          TOP="$PWD/openwrt"
+          PKG_DIR="$TOP/bin/targets/$TARGET/$SUBTARGET/packages"
+          [ -d "$PKG_DIR" ] || { echo "::error::没有目标包输出目录 $PKG_DIR"; exit 1; }
+
+          # vermagic = kmods/<seg> 的目录名（<linux 版本>-1-<hash>）
+          VM_SEG="$(basename "$(ls -d "$TOP/bin/targets/$TARGET/$SUBTARGET/kmods/"* 2>/dev/null | head -1)")"
+          [ -n "$VM_SEG" ] || { echo "::error::抠不到 vermagic"; exit 1; }
+          echo "vm_seg=$VM_SEG" >> "$GITHUB_OUTPUT"
+          echo "vermagic: $VM_SEG"
+
+          APK_BIN="$TOP/staging_dir/host/bin/apk"
+          APK_KEY="$TOP/private-key.pem"
+          [ -x "$APK_BIN" ] || { echo "::error::没有 apk 工具 $APK_BIN"; exit 1; }
+
+          KMOD_OUT="out/kmods/$VM_SEG"
+          BASE_OUT="out/base"
+          mkdir -p "$KMOD_OUT" "$BASE_OUT"
+          shopt -s nullglob
+          for src in "$PKG_DIR" "$TOP/bin/targets/$TARGET/$SUBTARGET/kmods/$VM_SEG"; do
+            [ -d "$src" ] || continue
+            for f in "$src"/kmod-*.apk; do cp "$f" "$KMOD_OUT/"; done
+          done
+          for f in "$PKG_DIR"/*.apk; do
+            case "$(basename "$f")" in kmod-*) : ;; *) cp "$f" "$BASE_OUT/" ;; esac
+          done
+          shopt -u nullglob
+
+          regen() {
+            ( cd "$1" && ls ./*.apk >/dev/null 2>&1 \
+              && "$APK_BIN" mkndx --root "$TOP" --keys-dir "$TOP" --allow-untrusted \
+                   --sign "$APK_KEY" --output packages.adb ./*.apk )
+          }
+          verify() {
+            "$APK_BIN" verify -v --keys-dir "$TOP" "$1/packages.adb" \
+              || { echo "::error::$2 packages.adb 签名自验失败"; exit 1; }
+          }
+          regen "$KMOD_OUT" || { echo "::error::kmod 索引生成失败"; exit 1; }
+          regen "$BASE_OUT" || { echo "::error::base 索引生成失败"; exit 1; }
+          verify "$KMOD_OUT" kmod
+          verify "$BASE_OUT" base
+
+          KMOD_COUNT="$(find "$KMOD_OUT" -name 'kmod-*.apk' | wc -l | tr -d ' ')"
+          echo "kmod_count=$KMOD_COUNT" >> "$GITHUB_OUTPUT"
+          echo "kmod=$KMOD_COUNT, base=$(find "$BASE_OUT" -maxdepth 1 -name '*.apk' | wc -l)"
+
+      - name: 产物形状断言
+        env:
+          VM_SEG: ${{ steps.kmod_meta.outputs.vm_seg }}
+          KMOD_COUNT: ${{ steps.kmod_meta.outputs.kmod_count }}
+        run: |
+          ls out/sdk-ib/openwrt-sdk-*.tar.* >/dev/null 2>&1 || { echo "::error::缺 SDK 归档"; exit 1; }
+          ls out/sdk-ib/openwrt-imagebuilder-*.tar.* >/dev/null 2>&1 || { echo "::error::缺 IB 归档"; exit 1; }
+          [ -f "out/kmods/$VM_SEG/packages.adb" ] || { echo "::error::缺 kmod 索引"; exit 1; }
+          [ -f "out/base/packages.adb" ] || { echo "::error::缺 base 索引"; exit 1; }
+          [ "${KMOD_COUNT:-0}" -gt 0 ] || { echo "::error::kmod 数为 0，编译多半残缺"; exit 1; }
+          # kmod 下降检测：与上一次真实构建比，暴跌多半是编译残缺。首次无 current.json 则跳过。
+          PREV="$(curl -fsSL --connect-timeout 10 "$REPO_BASE/$LINE/targets/$TARGET/$SUBTARGET/current.json" 2>/dev/null | jq -r '.build_id // empty' || true)"
+          if [ -n "$PREV" ]; then
+            PC="$(curl -fsSL --connect-timeout 10 "$REPO_BASE/$LINE/targets/$TARGET/$SUBTARGET/builds/$PREV/build.json" 2>/dev/null | jq -r '.kmod_count // empty' || true)"
+            if [ -n "$PC" ] && [ "$PC" -gt 0 ]; then
+              MIN=$(( PC * 70 / 100 ))
+              [ "$KMOD_COUNT" -ge "$MIN" ] || { echo "::error::kmod 数 $KMOD_COUNT < 上次 $PC 的 70%（$MIN），疑似残缺"; exit 1; }
+            fi
+          fi
+
+      - name: 生成 build.json / current.json
+        env:
+          BUILD_ID: ${{ steps.build_id.outputs.id }}
+          VM_SEG: ${{ steps.kmod_meta.outputs.vm_seg }}
+          KMOD_COUNT: ${{ steps.kmod_meta.outputs.kmod_count }}
+        run: |
+          SDK_PATH="$(ls out/sdk-ib/openwrt-sdk-*.tar.* 2>/dev/null | head -1)"
+          IB_PATH="$(ls out/sdk-ib/openwrt-imagebuilder-*.tar.* 2>/dev/null | head -1)"
+          SDK_FILE="$(basename "$SDK_PATH")"; IB_FILE="$(basename "$IB_PATH")"
+          SDK_SHA="$(sha256sum "$SDK_PATH" | awk '{print $1}')"
+          IB_SHA="$(sha256sum "$IB_PATH" | awk '{print $1}')"
+          KVER="${VM_SEG%%-1-*}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          mkdir -p out/reg-build out/reg-current
+          "$WRT" meta build --line "$LINE" --target "$TARGET" --subtarget "$SUBTARGET" \
+            --line-tree "$LINE_TREE" --upstream-commit "$UPSTREAM_COMMIT" \
+            --build-id "$BUILD_ID" --vermagic "$VM_SEG" --kernel-version "$KVER" \
+            --sdk-sha256 "$SDK_SHA" --ib-sha256 "$IB_SHA" --kmod-count "$KMOD_COUNT" \
+            --ci-run-url "$RUN_URL" > out/reg-build/build.json
+          "$WRT" meta current --build-id "$BUILD_ID" --vermagic "$VM_SEG" \
+            --sdk "$SDK_FILE" --ib "$IB_FILE" > out/reg-current/current.json
+
+      - name: 发布到 R2（sdk-ib → kmod → base → build.json → current.json 指针最后）
+        env:
+          BUILD_ID: ${{ steps.build_id.outputs.id }}
+          VM_SEG: ${{ steps.kmod_meta.outputs.vm_seg }}
+        run: |
+          BASEK="$LINE/targets/$TARGET/$SUBTARGET"
+          "$WRT" publish out/sdk-ib          "$BASEK/builds/$BUILD_ID/sdk-ib"
+          "$WRT" publish "out/kmods/$VM_SEG" "$BASEK/kmods/$VM_SEG"
+          "$WRT" publish out/base            "$BASEK/packages"
+          "$WRT" publish out/reg-build       "$BASEK/builds/$BUILD_ID"
+          "$WRT" publish out/reg-current     "$BASEK"
+
+      - name: 安全清理
+        if: always()
+        run: rm -f openwrt/private-key.pem

@@ -125,33 +125,54 @@ func runMetaBuild(c ctx, args []string) error {
 	ibSHA := fs.String("ib-sha256", "", "ImageBuilder 归档 sha256")
 	kmodCount := fs.Int("kmod-count", 0, "本次产出的 kmod 数（供下次回归门禁比对）")
 	ciURL := fs.String("ci-run-url", "", "本次 CI run 链接")
+	// 设备无关路径：toolchain 是按 (line, target, subtarget) 的，没有设备。给全
+	// 这组 flag 就直接构造，透传 plan 已算好的 line_tree/commit（指纹只算一次）。
+	line := fs.String("line", "", "line id（与 --target/--subtarget/--line-tree 同用，走设备无关路径）")
+	target := fs.String("target", "", "目标 target")
+	subtarget := fs.String("subtarget", "", "目标 subtarget")
+	lineTree := fs.String("line-tree", "", "plan 算好的 line 目录树指纹")
+	upstreamCommit := fs.String("upstream-commit", "", "上游源码 commit")
 	rest, err := parseFlags(fs, args)
 	if err != nil {
 		return err
 	}
-	if len(rest) != 1 {
-		return errors.New("用法: wrt meta build <device>@<line> --build-id B --vermagic V ...")
-	}
 	if *buildID == "" || *vermagic == "" {
 		return errors.New("meta build: --build-id 与 --vermagic 必填")
 	}
-	v, fp, err := variantFingerprints(c, rest[0])
-	if err != nil {
-		return err
+
+	var b artifacts.Build
+	switch {
+	case *line != "" && len(rest) == 0:
+		b = buildBuildCore(*line, *target, *subtarget, *upstreamCommit, *lineTree,
+			*buildID, *vermagic, *kernelVersion, *sdkSHA, *ibSHA, *kmodCount, *ciURL, time.Now())
+	case *line == "" && len(rest) == 1:
+		v, fp, err := variantFingerprints(c, rest[0])
+		if err != nil {
+			return err
+		}
+		b = buildBuild(v, fp, *buildID, *vermagic, *kernelVersion, *sdkSHA, *ibSHA, *kmodCount, *ciURL, time.Now())
+	default:
+		return errors.New("用法: wrt meta build --line L --target T --subtarget S --line-tree ... --build-id B --vermagic V ...  或  wrt meta build <device>@<line> --build-id B --vermagic V ...")
 	}
-	return emitJSON(c.stdout, buildBuild(v, fp, *buildID, *vermagic, *kernelVersion, *sdkSHA, *ibSHA, *kmodCount, *ciURL, time.Now()))
+	return emitJSON(c.stdout, b)
 }
 
+// buildBuild 从 variant 取坐标（本地手动核对路径）。
 func buildBuild(v resolve.Variant, fp plan.Fingerprints, buildID, vermagic, kernelVersion, sdkSHA, ibSHA string, kmodCount int, ciURL string, now time.Time) artifacts.Build {
+	return buildBuildCore(v.Line.ID, v.Hardware.Target, v.Hardware.Subtarget, sourceCommit(v), fp.LineTree,
+		buildID, vermagic, kernelVersion, sdkSHA, ibSHA, kmodCount, ciURL, now)
+}
+
+// buildBuildCore 纯构造 build.json：line_tree（配置改的）与 upstream_commit（源码
+// 改的）分两字段，排障时一眼区分；plan 比对时再用同一种方式组合回 line 指纹。
+func buildBuildCore(line, target, subtarget, upstreamCommit, lineTree, buildID, vermagic, kernelVersion, sdkSHA, ibSHA string, kmodCount int, ciURL string, now time.Time) artifacts.Build {
 	return artifacts.Build{
-		BuildID:   buildID,
-		Line:      v.Line.ID,
-		Target:    v.Hardware.Target,
-		Subtarget: v.Hardware.Subtarget,
-		// line_tree 与 upstream_commit 分两个字段：排障时一眼区分"配置改的"
-		// 还是"源码改的"，plan 比对时再用同一种方式组合回 line 指纹。
-		UpstreamCommit: sourceCommit(v),
-		LineTree:       fp.LineTree,
+		BuildID:        buildID,
+		Line:           line,
+		Target:         target,
+		Subtarget:      subtarget,
+		UpstreamCommit: upstreamCommit,
+		LineTree:       lineTree,
 		Vermagic:       vermagic,
 		KernelVersion:  kernelVersion,
 		SDKSHA256:      sdkSHA,

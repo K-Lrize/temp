@@ -43,15 +43,12 @@ jobs:
           chmod +x wrt
           echo "WRT=$PWD/wrt" >> "$GITHUB_ENV"
 
-      - name: 读取 variant 事实（并拦住 self 线）
+      - name: 读取 variant 事实
         run: |
           R="$($WRT resolve "$VARIANT")"
           echo "$R" | jq .
-          [ "$(echo "$R" | jq -r .line.artifacts)" = official ] || {
-            echo "::error::M2 只组装 official 线；$VARIANT 是 self（需先跑 toolchain/packages，属 M3）"
-            exit 1
-          }
           {
+            echo "ARTIFACTS=$(echo "$R" | jq -r .line.artifacts)"
             echo "TARGET=$(echo "$R" | jq -r .hardware.target)"
             echo "SUBTARGET=$(echo "$R" | jq -r .hardware.subtarget)"
             echo "PROFILE=$(echo "$R" | jq -r .hardware.profile)"
@@ -73,26 +70,40 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential python3 python3-setuptools rsync unzip wget zstd file xz-utils gawk
 
-      - name: 下载官方 ImageBuilder 并强制校验 sha256
+      - name: 取得 ImageBuilder（official 下官方 / self 从 R2 拉自建）
         run: |
-          IB_BASE="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${SUBTARGET}"
-          curl -fsSL --retry 3 -o sha256sums "$IB_BASE/sha256sums"
-          IB_FILE="$(grep -oE 'openwrt-imagebuilder-[^[:space:]]+\.tar\.(zst|xz|gz)' sha256sums | head -1)"
-          [ -n "$IB_FILE" ] || { echo "::error::sha256sums 里没有 imagebuilder 归档"; exit 1; }
-          curl -fL --retry 3 -o "$IB_FILE" "$IB_BASE/$IB_FILE"
-          EXPECT="$(grep -E "[[:space:]][*]?${IB_FILE}\$" sha256sums | awk '{print $1}' | head -1)"
-          echo "${EXPECT}  ${IB_FILE}" | sha256sum -c -
-          mkdir -p ib && tar -xf "$IB_FILE" --strip-components=1 -C ib
+          mkdir -p ib
+          if [ "$ARTIFACTS" = official ]; then
+            IB_BASE="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${SUBTARGET}"
+            curl -fsSL --retry 3 -o sha256sums "$IB_BASE/sha256sums"
+            IB_FILE="$(grep -oE 'openwrt-imagebuilder-[^[:space:]]+\.tar\.(zst|xz|gz)' sha256sums | head -1)"
+            [ -n "$IB_FILE" ] || { echo "::error::sha256sums 里没有 imagebuilder 归档"; exit 1; }
+            curl -fL --retry 3 -o "$IB_FILE" "$IB_BASE/$IB_FILE"
+            EXPECT="$(grep -E "[[:space:]][*]?${IB_FILE}\$" sha256sums | awk '{print $1}' | head -1)"
+            echo "${EXPECT}  ${IB_FILE}" | sha256sum -c -
+            tar -xf "$IB_FILE" --strip-components=1 -C ib
+            # official：vermagic 抠自官方 IB 自带 repositories。
+            REPOF=""; for c in ib/repositories ib/repositories.conf; do [ -f "$c" ] && { REPOF="$c"; break; }; done
+            VM="$(grep -oE '/kmods/[^/]+/' "$REPOF" | head -1 | sed 's|/kmods/||;s|/||')"
+          else
+            # self：current.json 指针 → builds/<build_id>/sdk-ib/<imagebuilder_archive>，
+            # vermagic 直接取自 current.json（唯一权威来源，别处不再 curl）。
+            META="$REPO_BASE/$LINE/targets/${TARGET}/${SUBTARGET}/current.json"
+            CUR="$(curl -fsSL --connect-timeout 15 "$META" 2>/dev/null || true)"
+            BUILD_ID="$(echo "$CUR" | jq -r '.build_id // empty')"
+            IB_FILE="$(echo "$CUR" | jq -r '.imagebuilder_archive // empty')"
+            VM="$(echo "$CUR" | jq -r '.vermagic // empty')"
+            [ -n "$BUILD_ID" ] && [ -n "$IB_FILE" ] && [ -n "$VM" ] || {
+              echo "::error::R2 没有 $META 或缺 build_id/imagebuilder_archive/vermagic；先为 $LINE 跑 toolchain"; exit 1; }
+            IB_BASE="$REPO_BASE/$LINE/targets/${TARGET}/${SUBTARGET}/builds/$BUILD_ID/sdk-ib"
+            curl -fsSL --retry 3 -o sha256sums "$IB_BASE/sha256sums"
+            curl -fL --retry 3 -o "$IB_FILE" "$IB_BASE/$IB_FILE"
+            EXPECT="$(grep -E "[[:space:]][*]?${IB_FILE}\$" sha256sums | awk '{print $1}' | head -1)"
+            echo "${EXPECT}  ${IB_FILE}" | sha256sum -c -
+            tar -xf "$IB_FILE" --strip-components=1 -C ib
+          fi
+          [ -n "$VM" ] || { echo "::error::无法确定 vermagic"; exit 1; }
           echo "IB=$PWD/ib" >> "$GITHUB_ENV"
-
-      - name: 从官方 IB 抠 vermagic（mode=download 的权威来源）
-        run: |
-          REPOF=""
-          for c in "$IB/repositories" "$IB/repositories.conf"; do
-            [ -f "$c" ] && { REPOF="$c"; break; }
-          done
-          VM="$(grep -oE '/kmods/[^/]+/' "$REPOF" | head -1 | sed 's|/kmods/||;s|/||')"
-          [ -n "$VM" ] || { echo "::error::无法从官方 IB 抠出 vermagic"; exit 1; }
           echo "VERMAGIC=$VM" >> "$GITHUB_ENV"
 
       - name: 装配三层软件源与 rootfs overlay
@@ -103,6 +114,24 @@ jobs:
           "$WRT" files "$VARIANT" "$IB/files-overlay"
           mkdir -p "$IB/files-overlay/etc/apk/repositories.d"
           echo "$REPOS" | jq -r '.runtime[]' > "$IB/files-overlay/etc/apk/repositories.d/99-custom.list"
+
+      - name: 注入自有公钥（IB 装包信任 + 设备运行期信任）
+        env:
+          APK_PUBLIC_KEY: ${{ secrets.APK_PUBLIC_KEY }}
+        # 自有 L1（及 self 线的 L2）是用我们的密钥签的，官方 IB 的 apk 默认只信
+        # 官方密钥，不注入公钥则 make image 装自有包时报 UNTRUSTED。两处都要放：
+        #   ib/keys/<fp>.pem                       —— make image 期间 IB 的 apk 信任
+        #   overlay/etc/apk/keys/<fp>.pem          —— 烧进固件，设备日后 apk update 信任
+        # apk 按公钥内容验签、不认文件名，<fp> 只是命名惯例（sha256 前 32 位）。
+        run: |
+          [ -n "$APK_PUBLIC_KEY" ] || { echo "::error::缺 secrets.APK_PUBLIC_KEY，装不上自有包"; exit 1; }
+          printf '%s\n' "$APK_PUBLIC_KEY" > pub.pem
+          FP="$(openssl dgst -sha256 -binary < pub.pem | xxd -p -c 256 | head -c 32)"
+          mkdir -p "$IB/keys" "$IB/files-overlay/etc/apk/keys"
+          cp pub.pem "$IB/keys/${FP}.pem"
+          cp pub.pem "$IB/files-overlay/etc/apk/keys/${FP}.pem"
+          rm -f pub.pem
+          echo "已注入公钥 ${FP}.pem"
 
       - name: make image
         working-directory: ib

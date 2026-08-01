@@ -92,7 +92,7 @@ jobs:
           key: ccache-pkg-${{ inputs.arch }}-${{ steps.ccache_bucket.outputs.bucket }}
           restore-keys: ccache-pkg-${{ inputs.arch }}-
 
-      - name: 取得 SDK（official 下官方 / self 拉自建）
+      - name: 取得 SDK（official 下官方 / self 从 R2 拉自建）
         run: |
           mkdir -p sdk
           if [ "$ARTIFACTS" = official ]; then
@@ -105,8 +105,20 @@ jobs:
             echo "${EXPECT}  ${SDK_FILE}" | sha256sum -c -
             tar -xf "$SDK_FILE" --strip-components=1 -C sdk
           else
-            echo "::error::self 线需自建 SDK（toolchain job，尚未落地）；${LINE} 暂不能编自有包"
-            exit 1
+            # self：current.json 指针 → builds/<build_id>/sdk-ib/<sdk_archive>，
+            # 由 toolchain job 发布。拉不到就是 toolchain 还没为这条线跑过。
+            META="$REPO_BASE/$LINE/targets/$SDK_TARGET/current.json"
+            CUR="$(curl -fsSL --connect-timeout 15 "$META" 2>/dev/null || true)"
+            BUILD_ID="$(echo "$CUR" | jq -r '.build_id // empty')"
+            SDK_FILE="$(echo "$CUR" | jq -r '.sdk_archive // empty')"
+            [ -n "$BUILD_ID" ] && [ -n "$SDK_FILE" ] || {
+              echo "::error::R2 没有 $META 或缺 build_id/sdk_archive；先为 $LINE 跑 toolchain"; exit 1; }
+            BASE="$REPO_BASE/$LINE/targets/$SDK_TARGET/builds/$BUILD_ID/sdk-ib"
+            curl -fsSL --retry 3 -o sha256sums "$BASE/sha256sums"
+            curl -fL --retry 3 -o "$SDK_FILE" "$BASE/$SDK_FILE"
+            EXPECT="$(grep -E "[[:space:]][*]?${SDK_FILE}\$" sha256sums | awk '{print $1}' | head -1)"
+            echo "${EXPECT}  ${SDK_FILE}" | sha256sum -c -
+            tar -xf "$SDK_FILE" --strip-components=1 -C sdk
           fi
 
       - name: 注入自有 feed（wrt feeds：pin 外部 feed + 挂 custom_feed）

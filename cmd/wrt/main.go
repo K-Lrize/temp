@@ -71,6 +71,24 @@ func commands() []command {
 			usage:   "wrt files <device>@<line> <dest>",
 			run:     runFiles,
 		},
+		{
+			name:    "meta",
+			summary: "生成发布用的元数据 JSON（build/current/manifest/latest/packages）",
+			usage:   "wrt meta <manifest|latest|build|current|packages> <variant> [flags]",
+			run:     runMeta,
+		},
+		{
+			name:    "publish",
+			summary: "把本地产物发布到 R2（内置内容→索引→指针顺序）",
+			usage:   "wrt publish <本地目录> <R2 前缀>",
+			run:     runPublish,
+		},
+		{
+			name:    "gc",
+			summary: "引用计数回收 R2 旧产物（默认 dry-run，超阈值熔断）",
+			usage:   "wrt gc [--keep N] [--apply] [--pin <d>@<line>:<rid>]",
+			run:     runGC,
+		},
 	}
 }
 

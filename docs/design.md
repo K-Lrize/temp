@@ -526,10 +526,15 @@ APK 版本号规则（旧仓库 `docs/reference/apk-versioning.md` 的沉淀）*
 | --- | --- | --- |
 | **M0** ✓ | 仓库骨架；`config` 类型 + `Validate()`；`wrt lint` / `resolve`；sets 拆分 | ✓ 对同一份配置，`wrt resolve` 与旧仓库 `expected/resolved.json` 语义等价（`TestMigrationPreservesPackageSets` 逐包核对 124 项） |
 | **M1** ✓ | `repos` / `files` / `plan` + 纯函数单测 | ✓ 判定逻辑已就位并有离线测试覆盖；「无变更时三个矩阵为空」要等 M2 真的往 R2 发布之后才能端到端验证 |
-| **M2** | `artifacts` / `publish` / `meta`；`release.yml` + `_firmware.yml`；先跑通 `artifacts: official` 的 vm-armsr | 一次 push 产出一份可刷的固件，落到新 R2 布局 |
-| **M3** | `_toolchain.yml` + `wrt src prepare/export`；跑通 `artifacts: self` | **自建 SDK/IB 落地**；`25.12-selfbuild` line 产出可用的 SDK/IB/kmod/target-base |
-| **M4** | `gc` + `verify` + qemu 冒烟 + PR 门禁 `ci.yml` | qemu 里 `apk update` 无 UNTRUSTED |
+| **M2** ⌁ | `artifacts` / `publish` / `meta`；`release.yml` + `_firmware.yml`；先跑通 `artifacts: official` 的 vm-armsr | 一次 push 产出一份可刷的固件，落到新 R2 布局 |
+| **M3** ⌁ | `_toolchain.yml`；跑通 `artifacts: self` | **自建 SDK/IB 落地**；`25.12-selfbuild` line 产出可用的 SDK/IB/kmod/target-base |
+| **M4** ◐ | `gc` + `verify` + qemu 冒烟 + PR 门禁 `ci.yml` | qemu 里 `apk update` 无 UNTRUSTED |
 | **M5** | mt3600be 接入；`25.12-mtk` line + 第一个内核补丁 | 一台设备两条线并行出货 |
+
+标记：`✓` 出口标准已验证；`⌁` 代码就绪、等 CI 实测才能验出口（本地无从跑全量编译 /
+真发布）；`◐` 部分落地。M3 的源码准备（clone@commit + `wrt feeds`）内联在 `_toolchain.yml`
+里——那是 git 克隆而非决策逻辑，没必要单开 `wrt src` 动词；要到 M5 引入内核补丁（quilt +
+符号存活校验，才是真逻辑）时再落 `wrt src prepare/export`。
 
 M3 是这次重构真正的目的地 —— 前面几步都是为了让"自己编 SDK/IB"这件事有个能承载它的
 结构。
@@ -538,7 +543,13 @@ M3 是这次重构真正的目的地 —— 前面几步都是为了让"自己�
 
 ## 13. 进度与交接
 
-> 截至 2026-07-31，M0 与 M1 已完成，共 16 个 commit 在本地 `main` 分支（未 push）。
+> 截至 2026-08-02，M0/M1 已验证完成，M2/M3 代码就绪（待 CI 实测），M4 已落 `ci.yml`
+> PR 门禁与 `gc`（dry-run）。全部 commit 在本地 `main` 分支（未 push）。
+>
+> M4 剩余、且属「纯代码、不碰真实基建」可继续推进的：`wrt verify`（签名/校验和）、
+> manifest 回归门禁（IB 输出的 `.manifest` 集合差集，非 `manifest.json`）、`gc --apply`
+> 熔断细化。`qemu 冒烟` 与「PR 里真构建 vm-armsr 固件」要碰真实 R2/密钥/官方下载站，
+> 归入「真实测试」，另行开启。
 
 ### 已落地
 

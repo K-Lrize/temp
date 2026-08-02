@@ -137,13 +137,21 @@ jobs:
             echo "CONFIG_IB=y"
             echo "# CONFIG_IB_STANDALONE is not set"
             echo "CONFIG_SIGNED_PACKAGES=y"
+            # ccache：CONFIG_CCACHE 的 Kconfig 提示是「if DEVEL」，不开 CONFIG_DEVEL
+            # 会被 defconfig 静默丢弃、ccache 根本不启用。且 OpenWrt 的 rules.mk 会
+            # export CCACHE_DIR=$(TOPDIR)/.ccache（build 树内、每次全新，缓存不到），
+            # 必须用 CONFIG_CCACHE_DIR 显式指到 actions/cache 缓存的 $HOME/.ccache。
+            echo "CONFIG_DEVEL=y"
             echo "CONFIG_CCACHE=y"
+            echo "CONFIG_CCACHE_DIR=\"$HOME/.ccache\""
           } >> .config
           make defconfig
           # make defconfig 会静默丢弃依赖不满足的符号，逐条回读确认真的生效。
-          for sym in CONFIG_SDK=y CONFIG_IB=y CONFIG_ALL_KMODS=y CONFIG_SIGNED_PACKAGES=y; do
+          for sym in CONFIG_SDK=y CONFIG_IB=y CONFIG_ALL_KMODS=y CONFIG_SIGNED_PACKAGES=y CONFIG_CCACHE=y; do
             grep -q "^${sym}\$" .config || { echo "::error::${sym} 未生效（被 defconfig 丢弃）"; exit 1; }
           done
+          grep -q "^CONFIG_CCACHE_DIR=\"$HOME/.ccache\"\$" .config \
+            || echo "::warning::CONFIG_CCACHE_DIR 未按预期落定，ccache 可能未被缓存"
 
       - name: 全量编译（make world）
         working-directory: openwrt
@@ -151,7 +159,8 @@ jobs:
         # 包(y)失败仍直接 fail。完整性靠发布前的形状断言把关，不靠"任何包失败即整体
         # 失败"——后者拦不住真残缺、又被上游偶发问题反复打断。
         run: |
-          export CCACHE_DIR="$HOME/.ccache"
+          # CCACHE_DIR 由 .config 的 CONFIG_CCACHE_DIR 经 rules.mk 统一 export，
+          # 这里不再手动设（手动设会被 rules.mk 覆盖，纯误导）。
           make -j"$(nproc)" world IGNORE_ERRORS="n m"
 
       - name: 收集 SDK / IB
@@ -170,22 +179,30 @@ jobs:
           PKG_DIR="$TOP/bin/targets/$TARGET/$SUBTARGET/packages"
           [ -d "$PKG_DIR" ] || { echo "::error::没有目标包输出目录 $PKG_DIR"; exit 1; }
 
-          # vermagic = <linux 版本>-1-<hash>，两路取值（照搬 wrt-build 跑通版）：
-          #   主路径：kmods/<seg> 目录名——opkg 版会建这个目录。
-          #   兜底：apk 版（25.12）常不建该目录、kmod 直接进 packages/，此时读内核
-          #         构建产出的 .vermagic 文件（<hash>）配 linux 版本目录名自行拼装。
-          # 这个串只是 R2 上 kmod 的路径标签，firmware 侧从同一份 current.json 读它、
-          # 两边恒一致；内核 ABI 匹配另由 kmod 的 kernel= 依赖保证。
-          KMOD_REAL_DIR="$(ls -d "$TOP/bin/targets/$TARGET/$SUBTARGET/kmods/"* 2>/dev/null | head -1 || true)"
-          if [ -n "$KMOD_REAL_DIR" ] && [ -d "$KMOD_REAL_DIR" ]; then
-            VM_SEG="$(basename "$KMOD_REAL_DIR")"
-          else
+          # vermagic 路径段的规范定义（OpenWrt include/feeds.mk）：
+          #   kmods/$(LINUX_VERSION)-$(LINUX_RELEASE)-$(LINUX_VERMAGIC)   例: 6.12.94-1-<hash>
+          # 权威取值：直接从刚构建出的 IB 自带 repositories 里抠 kmods/<seg>——那是
+          # OpenWrt 自己按上式拼好的，也正是 firmware 组装时这份 IB 要找的路径，取自
+          # 同一处即保证两边一致，且天然处理 LINUX_RELEASE 被 target 覆盖的情况。
+          IB_TAR="$(ls out/sdk-ib/openwrt-imagebuilder-*.tar.* 2>/dev/null | head -1)"
+          case "$IB_TAR" in
+            *.zst) TARZ=(--use-compress-program=unzstd) ;;
+            *.xz)  TARZ=(-J) ;;
+            *.gz)  TARZ=(-z) ;;
+            *)     TARZ=() ;;
+          esac
+          VM_SEG=""
+          if [ -n "$IB_TAR" ]; then
+            VM_SEG="$(tar "${TARZ[@]}" -xf "$IB_TAR" --wildcards '*/repositories' -O 2>/dev/null \
+              | grep -oE 'kmods/[^/[:space:]]+' | head -1 | sed 's#kmods/##')"
+          fi
+          # 兜底：IB 里无 kmods 行（CONFIG_ALL_KMODS=y 下不应发生）时，按同一公式自算
+          # ——LINUX_VERSION 取内核构建目录名、LINUX_VERMAGIC 取 .vermagic、RELEASE 默认 1。
+          if [ -z "$VM_SEG" ]; then
             VM_FILE="$(ls "$TOP"/build_dir/target-*/linux-"$TARGET"_"$SUBTARGET"/linux-*/.vermagic 2>/dev/null | head -1)"
-            [ -f "$VM_FILE" ] || { echo "::error::抠不到 vermagic：kmods/<seg> 目录与 .vermagic 文件都不存在"; exit 1; }
-            VM_HASH="$(tr -d '\r\n' < "$VM_FILE")"
+            [ -f "$VM_FILE" ] || { echo "::error::抠不到 vermagic：IB repositories 无 kmods 行，且无 .vermagic"; exit 1; }
             LINUX_DIR="$(ls -d "$TOP"/build_dir/target-*/linux-"$TARGET"_"$SUBTARGET"/linux-* 2>/dev/null | head -1)"
-            LINUX_VER="$(basename "$LINUX_DIR" | sed 's/^linux-//')"
-            VM_SEG="${LINUX_VER}-1-${VM_HASH}"
+            VM_SEG="$(basename "$LINUX_DIR" | sed 's/^linux-//')-1-$(tr -d '\r\n' < "$VM_FILE")"
           fi
           [ -n "$VM_SEG" ] || { echo "::error::抠不到 vermagic"; exit 1; }
           echo "vm_seg=$VM_SEG" >> "$GITHUB_OUTPUT"

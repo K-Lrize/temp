@@ -544,12 +544,12 @@ M3 是这次重构真正的目的地 —— 前面几步都是为了让"自己�
 ## 13. 进度与交接
 
 > 截至 2026-08-02，M0/M1 已验证完成，M2/M3 代码就绪（待 CI 实测），M4 已落 `ci.yml`
-> PR 门禁与 `gc`（dry-run）。全部 commit 在本地 `main` 分支（未 push）。
+> PR 门禁、`gc`（dry-run）与 manifest 回归门禁（`wrt verify manifest` + `_firmware.yml`
+> 收/比对 `.manifest`）。全部 commit 在本地 `main` 分支（未 push）。
 >
-> M4 剩余、且属「纯代码、不碰真实基建」可继续推进的：`wrt verify`（签名/校验和）、
-> manifest 回归门禁（IB 输出的 `.manifest` 集合差集，非 `manifest.json`）、`gc --apply`
-> 熔断细化。`qemu 冒烟` 与「PR 里真构建 vm-armsr 固件」要碰真实 R2/密钥/官方下载站，
-> 归入「真实测试」，另行开启。
+> M4 剩余、且属「纯代码、不碰真实基建」可继续推进的：`wrt verify` 的签名/校验和
+> 验证（现只有 `manifest` 子命令）、`gc --apply` 熔断切换。`qemu 冒烟` 与「PR 里真
+> 构建 vm-armsr 固件」要碰真实 R2/密钥/官方下载站，归入「真实测试」，另行开启。
 
 ### 已落地
 

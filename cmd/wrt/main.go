@@ -90,6 +90,12 @@ func commands() []command {
 			run:     runPublish,
 		},
 		{
+			name:    "verify",
+			summary: "发布前验证门禁（manifest 回归：与上一版比有包消失即 fail）",
+			usage:   "wrt verify manifest --curr <file> [--prev <file>]",
+			run:     runVerify,
+		},
+		{
 			name:    "gc",
 			summary: "引用计数回收 R2 旧产物（默认 dry-run，超阈值熔断）",
 			usage:   "wrt gc [--keep N] [--apply] [--pin <d>@<line>:<rid>]",

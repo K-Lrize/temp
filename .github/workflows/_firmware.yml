@@ -5,8 +5,9 @@
 # 与 scripts/local-ib.sh（本地测试工具）各走各的：这里在 GH runner 上直接
 # make image（runner 本身就是 ubuntu，装上依赖即可，不必再套 Docker）。
 #
-# 未做（留后续）：manifest 回归门禁（与上一个 release 比，有包消失即 fail）——
-# 需要拉上一份 .manifest 比对，单独一步，M2 先不挡。
+# 发布前一道 manifest 回归门禁：IB 每次产出的 .manifest 收进 release 目录（固定名
+# image.manifest），下次构建拉上一版比对，有包消失即 fail——直击「IB 条件依赖静默
+# 失效、某包悄悄少装」那类不会报错的坑。比对逻辑在 wrt verify manifest 里。
 
 name: (internal) Assemble firmware
 
@@ -145,6 +146,26 @@ jobs:
           img="$(ls "$IB"/out/*.img.gz 2>/dev/null | head -1 || true)"
           [ -n "$img" ] || { echo "::error::make image 没产出 .img.gz"; exit 1; }
 
+      - name: manifest 回归门禁（与上一版比，有包消失即 fail）
+        run: |
+          CURR="$(ls "$IB"/out/*.manifest 2>/dev/null | head -1 || true)"
+          [ -n "$CURR" ] || { echo "::error::make image 没产出 .manifest"; exit 1; }
+          cp "$CURR" curr.manifest
+          # 上一版 = 当前 latest.json 指向的 release（本步在覆盖 latest 之前跑）。
+          # 存的是固定名 image.manifest，路径可预测、不必猜 IB 那串带版本的文件名。
+          LINEDIR="devices/${DEVICE}/${LINE}"
+          PREV_RID="$(curl -fsSL --connect-timeout 15 "$REPO_BASE/$LINEDIR/latest.json" 2>/dev/null | jq -r '.release_id // empty' || true)"
+          PREV_ARG=""
+          if [ -n "$PREV_RID" ]; then
+            if curl -fsSL --connect-timeout 15 -o prev.manifest \
+                 "$REPO_BASE/$LINEDIR/releases/$PREV_RID/image.manifest" 2>/dev/null; then
+              PREV_ARG="--prev prev.manifest"
+            else
+              echo "::warning::上一版 $PREV_RID 无 image.manifest（可能早于门禁上线），跳过比对"
+            fi
+          fi
+          "$WRT" verify manifest $PREV_ARG --curr curr.manifest
+
       - name: 组装发布目录（固件 + manifest + latest 指针）
         run: |
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
@@ -155,6 +176,8 @@ jobs:
           mkdir -p "stage/${RELDIR}"
           cp "$IB"/out/*.img.gz "stage/${RELDIR}/"
           cp "$IB"/out/sha256sums "stage/${RELDIR}/" 2>/dev/null || true
+          # 固定名收录，供下一版回归门禁比对（IB 原文件名带版本，不可预测）。
+          cp curr.manifest "stage/${RELDIR}/image.manifest"
           "$WRT" meta manifest "$VARIANT" --release-id "$RELEASE_ID" --vermagic "$VERMAGIC" \
             --ci-run-url "$RUN_URL" > "stage/${RELDIR}/manifest.json"
           "$WRT" meta latest --release-id "$RELEASE_ID" > "stage/${LINEDIR}/latest.json"

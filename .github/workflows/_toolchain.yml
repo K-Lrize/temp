@@ -76,10 +76,13 @@ jobs:
       - name: 安装构建依赖
         run: |
           sudo apt-get update -qq
+          # 与 wrt-build 跑通版对齐（尤其 libelf-dev：OpenWrt 内核阶段 pahole/objtool
+          # 的构建前置，缺它 make world 会在内核编译处失败）。jq/curl 多为 runner
+          # 预装，仍显式列出以对齐、去不确定性。
           sudo apt-get install -y --no-install-recommends \
             build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
-            gettext git libncurses-dev libssl-dev python3 python3-setuptools \
-            rsync unzip zlib1g-dev file wget zstd ccache
+            gettext git libncurses-dev libssl-dev libelf-dev python3 python3-setuptools \
+            rsync unzip zlib1g-dev file wget zstd ccache jq curl xxd
 
       # ccache 缓存步骤已移除：ccache 未启用（见 .config 步骤说明），缓存空目录无意义。
       # 待 ccache 跨 run 加速作为独立任务落地时，连同 CONFIG 一起加回。
@@ -126,15 +129,19 @@ jobs:
             echo "CONFIG_ALL_KMODS=y"
             echo "CONFIG_INSTALL_LIBSTDCPP=y"
             echo "CONFIG_INSTALL_LIBSSP=y"
+            # 强制产出全部 toolchain 运行时库为包，免得官方 L3 依赖 libstdcpp6/libssp/
+            # libatomic1 时 base feed 里缺件（与 wrt-build 对齐）。
             echo "CONFIG_PACKAGE_libatomic=m"
+            echo "CONFIG_PACKAGE_libstdcpp=m"
+            echo "CONFIG_PACKAGE_libssp=m"
             echo "CONFIG_SDK=y"
             echo "CONFIG_IB=y"
             echo "# CONFIG_IB_STANDALONE is not set"
             echo "CONFIG_SIGNED_PACKAGES=y"
-            # ccache：暂不显式启用。查明真相后确认——真正让 ccache 跨 run 缓存需要开
-            # CONFIG_DEVEL + CONFIG_CCACHE_DIR 把目录指到 $HOME/.ccache，但那样会让
-            # host 工具（tools/liblzo）编不过（排除法确认，疑似 ccache-4.9.1 交互）。
-            # ccache 是优化非正确性，先不搭车；跨 run 加速另作独立任务用 V=s 隔离排查。
+            # ccache：暂不显式启用。旧版是 CONFIG_CCACHE=y 且无 DEVEL（等同没生效）。
+            # 让它真正跨 run 缓存需 DEVEL+CCACHE_DIR，但那次尝试 make world 挂在 liblzo；
+            # 因 parallel 日志无真错、n=1，尚不能定其为因。ccache 是优化非正确性，先不
+            # 搭车，跨 run 加速另作独立任务用 V=s 隔离排查。
           } >> .config
           make defconfig
           # make defconfig 会静默丢弃依赖不满足的符号，逐条回读确认真的生效。

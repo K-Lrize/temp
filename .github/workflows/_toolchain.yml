@@ -81,14 +81,8 @@ jobs:
             gettext git libncurses-dev libssl-dev python3 python3-setuptools \
             rsync unzip zlib1g-dev file wget zstd ccache
 
-      - name: ccache 分桶（按周）
-        id: ccache_bucket
-        run: echo "bucket=$(date -u +%Y-%W)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
-        with:
-          path: ~/.ccache
-          key: ccache-tc-${{ inputs.target }}-${{ inputs.subtarget }}-${{ steps.ccache_bucket.outputs.bucket }}
-          restore-keys: ccache-tc-${{ inputs.target }}-${{ inputs.subtarget }}-
+      # ccache 缓存步骤已移除：ccache 未启用（见 .config 步骤说明），缓存空目录无意义。
+      # 待 ccache 跨 run 加速作为独立任务落地时，连同 CONFIG 一起加回。
 
       - name: 计算不可变 build_id
         id: build_id
@@ -137,31 +131,23 @@ jobs:
             echo "CONFIG_IB=y"
             echo "# CONFIG_IB_STANDALONE is not set"
             echo "CONFIG_SIGNED_PACKAGES=y"
-            # ccache：CONFIG_CCACHE 的 Kconfig 提示是「if DEVEL」，不开 CONFIG_DEVEL
-            # 会被 defconfig 静默丢弃、ccache 根本不启用。且 OpenWrt 的 rules.mk 会
-            # export CCACHE_DIR=$(TOPDIR)/.ccache（build 树内、每次全新，缓存不到），
-            # 必须用 CONFIG_CCACHE_DIR 显式指到 actions/cache 缓存的 $HOME/.ccache。
-            echo "CONFIG_DEVEL=y"
-            echo "CONFIG_CCACHE=y"
-            echo "CONFIG_CCACHE_DIR=\"$HOME/.ccache\""
+            # ccache：暂不显式启用。查明真相后确认——真正让 ccache 跨 run 缓存需要开
+            # CONFIG_DEVEL + CONFIG_CCACHE_DIR 把目录指到 $HOME/.ccache，但那样会让
+            # host 工具（tools/liblzo）编不过（排除法确认，疑似 ccache-4.9.1 交互）。
+            # ccache 是优化非正确性，先不搭车；跨 run 加速另作独立任务用 V=s 隔离排查。
           } >> .config
           make defconfig
           # make defconfig 会静默丢弃依赖不满足的符号，逐条回读确认真的生效。
-          for sym in CONFIG_SDK=y CONFIG_IB=y CONFIG_ALL_KMODS=y CONFIG_SIGNED_PACKAGES=y CONFIG_CCACHE=y; do
+          for sym in CONFIG_SDK=y CONFIG_IB=y CONFIG_ALL_KMODS=y CONFIG_SIGNED_PACKAGES=y; do
             grep -q "^${sym}\$" .config || { echo "::error::${sym} 未生效（被 defconfig 丢弃）"; exit 1; }
           done
-          grep -q "^CONFIG_CCACHE_DIR=\"$HOME/.ccache\"\$" .config \
-            || echo "::warning::CONFIG_CCACHE_DIR 未按预期落定，ccache 可能未被缓存"
 
       - name: 全量编译（make world）
         working-directory: openwrt
         # IGNORE_ERRORS="n m"：只放过未选中(n)与模块(m)的失败，进 rootfs 的必需
         # 包(y)失败仍直接 fail。完整性靠发布前的形状断言把关，不靠"任何包失败即整体
         # 失败"——后者拦不住真残缺、又被上游偶发问题反复打断。
-        run: |
-          # CCACHE_DIR 由 .config 的 CONFIG_CCACHE_DIR 经 rules.mk 统一 export，
-          # 这里不再手动设（手动设会被 rules.mk 覆盖，纯误导）。
-          make -j"$(nproc)" world IGNORE_ERRORS="n m"
+        run: make -j"$(nproc)" world IGNORE_ERRORS="n m"
 
       - name: 收集 SDK / IB
         run: |

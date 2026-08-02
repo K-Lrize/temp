@@ -170,8 +170,23 @@ jobs:
           PKG_DIR="$TOP/bin/targets/$TARGET/$SUBTARGET/packages"
           [ -d "$PKG_DIR" ] || { echo "::error::没有目标包输出目录 $PKG_DIR"; exit 1; }
 
-          # vermagic = kmods/<seg> 的目录名（<linux 版本>-1-<hash>）
-          VM_SEG="$(basename "$(ls -d "$TOP/bin/targets/$TARGET/$SUBTARGET/kmods/"* 2>/dev/null | head -1)")"
+          # vermagic = <linux 版本>-1-<hash>，两路取值（照搬 wrt-build 跑通版）：
+          #   主路径：kmods/<seg> 目录名——opkg 版会建这个目录。
+          #   兜底：apk 版（25.12）常不建该目录、kmod 直接进 packages/，此时读内核
+          #         构建产出的 .vermagic 文件（<hash>）配 linux 版本目录名自行拼装。
+          # 这个串只是 R2 上 kmod 的路径标签，firmware 侧从同一份 current.json 读它、
+          # 两边恒一致；内核 ABI 匹配另由 kmod 的 kernel= 依赖保证。
+          KMOD_REAL_DIR="$(ls -d "$TOP/bin/targets/$TARGET/$SUBTARGET/kmods/"* 2>/dev/null | head -1 || true)"
+          if [ -n "$KMOD_REAL_DIR" ] && [ -d "$KMOD_REAL_DIR" ]; then
+            VM_SEG="$(basename "$KMOD_REAL_DIR")"
+          else
+            VM_FILE="$(ls "$TOP"/build_dir/target-*/linux-"$TARGET"_"$SUBTARGET"/linux-*/.vermagic 2>/dev/null | head -1)"
+            [ -f "$VM_FILE" ] || { echo "::error::抠不到 vermagic：kmods/<seg> 目录与 .vermagic 文件都不存在"; exit 1; }
+            VM_HASH="$(tr -d '\r\n' < "$VM_FILE")"
+            LINUX_DIR="$(ls -d "$TOP"/build_dir/target-*/linux-"$TARGET"_"$SUBTARGET"/linux-* 2>/dev/null | head -1)"
+            LINUX_VER="$(basename "$LINUX_DIR" | sed 's/^linux-//')"
+            VM_SEG="${LINUX_VER}-1-${VM_HASH}"
+          fi
           [ -n "$VM_SEG" ] || { echo "::error::抠不到 vermagic"; exit 1; }
           echo "vm_seg=$VM_SEG" >> "$GITHUB_OUTPUT"
           echo "vermagic: $VM_SEG"
@@ -180,14 +195,22 @@ jobs:
           APK_KEY="$TOP/private-key.pem"
           [ -x "$APK_BIN" ] || { echo "::error::没有 apk 工具 $APK_BIN"; exit 1; }
 
+          TGT_DIR="$TOP/bin/targets/$TARGET/$SUBTARGET"
+          # 布局诊断：apk 版（25.12）与 opkg 版的 kmod 落点不同，打出来一眼可核。
+          echo "::group::bin/targets/$TARGET/$SUBTARGET 布局"
+          find "$TGT_DIR" -maxdepth 2 -type d | sed "s#$TGT_DIR#.#"
+          echo "kmod-*.apk 落点分布(目录 计数)："
+          find "$TGT_DIR" -name 'kmod-*.apk' -printf '%h\n' | sort | uniq -c
+          echo "::endgroup::"
+
           KMOD_OUT="out/kmods/$VM_SEG"
           BASE_OUT="out/base"
           mkdir -p "$KMOD_OUT" "$BASE_OUT"
+          # kmod：在整个 target 目录下 find，不写死子目录——apk 版可能落在 packages/、
+          # opkg 版落在 kmods/<seg>/，两者都能收（同名去重靠覆盖）。
+          # base：只取 packages/ 里的非 kmod 包（target 核心 + kernel）。
+          find "$TGT_DIR" -name 'kmod-*.apk' -exec cp -f {} "$KMOD_OUT/" \;
           shopt -s nullglob
-          for src in "$PKG_DIR" "$TOP/bin/targets/$TARGET/$SUBTARGET/kmods/$VM_SEG"; do
-            [ -d "$src" ] || continue
-            for f in "$src"/kmod-*.apk; do cp "$f" "$KMOD_OUT/"; done
-          done
           for f in "$PKG_DIR"/*.apk; do
             case "$(basename "$f")" in kmod-*) : ;; *) cp "$f" "$BASE_OUT/" ;; esac
           done

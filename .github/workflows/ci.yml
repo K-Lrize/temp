@@ -1,0 +1,50 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+#
+# PR 门禁：任何设备/配置/代码改动在合进 main 前先过这一关——不然只能推 main
+# 才知道对不对，而 main 一跑就直接发布到 R2。
+#
+# 这里刻意只做「无副作用、无外部依赖」的检查：checkout 即可跑完，不碰 R2、
+# 不用任何 secret、不下官方归档。三件事：
+#   1. wrt lint            —— 配置与自有包 Makefile 的全部静态校验
+#   2. go vet + 单测(-race) —— 含 TestMigrationPreservesPackageSets 这个 golden diff
+#                              （逐包核对 124 项，解析逻辑一改就在 PR 里变成行为 diff）
+#   3. wrt plan 冒烟        —— 不给 repo-base：离线跑，一切视作待构建，只验证
+#                              plan 不崩、输出是合法 JSON（矩阵形状对不对由单测保证）
+#
+# 「PR 里真的构建一份 vm-armsr 固件但不发布」这一层门禁属设计里的 M4，但它要下
+# 官方 IB、注入公钥(secret)、并从 R2 拉 main 上的 L1——碰真实基建，留到开始真实
+# 测试时再接。见 docs/design.md §7「PR 门禁」。
+
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: 构建 wrt
+        run: go build -o wrt ./cmd/wrt
+
+      - name: 校验配置（wrt lint）
+        run: ./wrt lint
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: 单测（含 golden diff）
+        run: go test -race ./...
+
+      - name: plan 冒烟（离线，只验证不崩且输出合法 JSON）
+        run: ./wrt plan --all | jq . > /dev/null

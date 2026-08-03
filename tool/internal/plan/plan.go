@@ -80,7 +80,13 @@ func (p Plan) Empty() bool {
 
 // Pending 只保留真正需要构建的条目，用来喂 CI 矩阵。
 func (p Plan) Pending() Plan {
-	var out Plan
+	// 空矩阵必须序列化成 []（而非 nil→null）：release.yml 用 `!= '[]'` 判断某条
+	// 线是否需要构建，null 会漏过这个门、让 job 带空矩阵启动而报错。
+	out := Plan{
+		Toolchain: []ToolchainEntry{},
+		Packages:  []PackagesEntry{},
+		Firmware:  []FirmwareEntry{},
+	}
 	for _, e := range p.Toolchain {
 		if e.NeedsBuild {
 			out.Toolchain = append(out.Toolchain, e)

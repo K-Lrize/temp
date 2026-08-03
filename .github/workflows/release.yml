@@ -36,11 +36,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: tool/go.mod
           cache: true
+          cache-dependency-path: tool/go.sum
 
       - name: 构建 wrt（一次 build，下游 job 复用同一字节的二进制）
-        run: go build -o wrt ./cmd/wrt
+        working-directory: tool
+        run: go build -o ../wrt ./cmd/wrt
       - uses: actions/upload-artifact@v4
         with:
           name: wrt

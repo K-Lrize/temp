@@ -251,7 +251,7 @@ func TestProblemsPointAtTheMakefile(t *testing.T) {
 }
 
 func TestRepositoryFeedIsValid(t *testing.T) {
-	root, err := filepath.Abs(filepath.Join("..", ".."))
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -27,12 +27,16 @@ sets/<name>.yaml              可复用的包清单
 files/                        所有设备共用的 rootfs overlay
 files-gen/                    合并后加工 overlay 的构建期脚本（哑执行器，不 fetch）
 feed/                         自有软件包源码 + pin 到 commit 的外部 feed
-cmd/ internal/                wrt 本体
+tool/                         wrt 本体（Go 源码：cmd/ internal/ + go.mod）
 ```
+
+> Go 相关命令都在 `tool/` 子目录下运行（`go.mod` 在那里）。wrt 会向上找含
+> `lines/` 与 `sets/` 的目录当仓库根，所以编好的二进制在仓库任意位置都能直接跑。
 
 ## 用法
 
 ```bash
+cd tool
 go run ./cmd/wrt help            # 自文档入口
 go run ./cmd/wrt lint            # 校验全部配置
 go run ./cmd/wrt resolve --all   # 展开全部 variant
@@ -53,6 +57,7 @@ go run ./cmd/wrt files mt3600be@25.12 /tmp/overlay
 ## 开发
 
 ```bash
+cd tool
 go test -race ./...                       # 全部测试
 go test ./internal/resolve -update        # 刷新 variant golden 基线
 ```

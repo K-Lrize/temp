@@ -8,10 +8,10 @@ import (
 	"testing"
 )
 
-// repoRoot 是本仓库自己的配置树。internal/config -> 上两级。
+// repoRoot 是本仓库自己的配置树。Go 源码在 tool/ 子目录，故 tool/internal/config -> 上三级。
 func repoRoot(t *testing.T) string {
 	t.Helper()
-	root, err := filepath.Abs(filepath.Join("..", ".."))
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}

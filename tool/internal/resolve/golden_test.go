@@ -25,7 +25,7 @@ const goldenDir = "testdata/variants"
 //
 // 刷新基线：go test ./internal/resolve -update
 func TestVariantGolden(t *testing.T) {
-	root, err := filepath.Abs(filepath.Join("..", ".."))
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}

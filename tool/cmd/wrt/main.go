@@ -173,7 +173,9 @@ func printHelp(w io.Writer) {
 }
 
 // repositoryRoot 定位仓库根。显式 -C 优先，其次 WRT_ROOT，最后从当前目录
-// 向上找 go.mod——这样在仓库里任何子目录下都能直接跑。
+// 向上找配置树根——含 lines/ 与 sets/ 的目录即仓库根。这样在仓库任意子目录
+// （含 Go 源码所在的 tool/）下都能直接跑。历史上以 go.mod 为标记，但 Go 源码
+// 收进 tool/ 后 go.mod 不再位于仓库根，改用配置目录本身作标记。
 func repositoryRoot(explicit string) (string, error) {
 	if explicit != "" {
 		return filepath.Abs(explicit)
@@ -187,15 +189,27 @@ func repositoryRoot(explicit string) (string, error) {
 		return "", err
 	}
 	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+		if isRepositoryRoot(dir) {
 			return dir, nil
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", errors.New("没找到仓库根（当前目录及其各级父目录都没有 go.mod）；用 -C 显式指定")
+			return "", errors.New("没找到仓库根（当前目录及其各级父目录都没有 lines/ 与 sets/）；用 -C 显式指定")
 		}
 		dir = parent
 	}
+}
+
+// isRepositoryRoot 判定 dir 是否为仓库根：同时含 lines/ 与 sets/ 两个目录。
+// 两个标记一起用，避免误把恰好有单个同名目录的无关路径当成根。
+func isRepositoryRoot(dir string) bool {
+	for _, marker := range [...]string{"lines", "sets"} {
+		info, err := os.Stat(filepath.Join(dir, marker))
+		if err != nil || !info.IsDir() {
+			return false
+		}
+	}
+	return true
 }
 
 // parseFlags 解析子命令的 flag，并返回位置参数。

@@ -320,9 +320,11 @@ variant_fp = sha256(device.yaml + files/ + 该 device 实际 include 的 sets
 
 `✓` 已落地，其余按 §12 的阶段推进。
 
+Go 源码都在 `tool/` 子目录（`go.mod` 在此，与仓库根的配置树解耦）：
+
 ```
-cmd/wrt/main.go              ✓
-internal/
+tool/cmd/wrt/main.go         ✓
+tool/internal/
 ├── config/      types.go = schema = 唯一校验点；load.go；validate.go；packages.go  ✓
 ├── resolve/     device × line → Variant                                            ✓
 ├── repos/       三层 URL 装配（纯函数）                                              ✓

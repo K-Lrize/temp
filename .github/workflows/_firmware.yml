@@ -107,6 +107,25 @@ jobs:
           echo "IB=$PWD/ib" >> "$GITHUB_ENV"
           echo "VERMAGIC=$VM" >> "$GITHUB_ENV"
 
+      - name: 绕过上游 IB 的 prepare_rootfs 空 then 语法错（openwrt-25.12 未修，官方/自建 IB 同病）
+        run: |
+          # include/rootfs.mk 的 prepare_rootfs 里 opkg 分支写成：
+          #   if [ -z "$(CONFIG_USE_APK)" ]; then $(if $(IB),,awk -i inplace ...) ; ... fi
+          # ImageBuilder 装配镜像时硬传 IB=1（target/imagebuilder/files/Makefile），
+          # 于是 $(if $(IB),,awk...) 展开为空，只剩行尾那个 `;`，渲染出
+          #   then  ; sed ... fi  → bash 解析即 "syntax error near unexpected token ';'"，
+          # make[2] [prepare_rootfs] Error 2。apk 模式下该分支运行时不执行，但仍要被
+          # 解析，照样炸；整树 make world（IB 未置位）反而没事，故只在 IB 路径打补丁。
+          # 把空 then 改成 `:` 占位（= 上游本应有的写法），语义不变（IB 下本就不跑该 awk）。
+          RF="$IB/include/rootfs.mk"
+          if [ -f "$RF" ] && grep -q ',,awk -i inplace' "$RF"; then
+            sed -i 's/,,awk -i inplace/,:,awk -i inplace/' "$RF"
+            grep -q ',:,awk -i inplace' "$RF" || { echo "::error::rootfs.mk 修补未生效"; exit 1; }
+            echo "已修补 $RF（空 then → : 占位）"
+          else
+            echo "rootfs.mk 无该模式（上游可能已修或路径变化），跳过"
+          fi
+
       - name: 装配三层软件源与 rootfs overlay
         run: |
           REPOS="$($WRT repos "$VARIANT" --vermagic "$VERMAGIC" --repo-base "$REPO_BASE")"

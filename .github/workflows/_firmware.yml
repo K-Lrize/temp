@@ -156,14 +156,22 @@ jobs:
       - name: make image
         working-directory: ib
         run: |
-          ARGS=(PROFILE="$PROFILE" PACKAGES="$PACKAGES" FILES=files-overlay BIN_DIR=out)
+          # BIN_DIR 必须给绝对路径：armsr 等目标的 kernel_prepare 在构建子目录里跑，
+          # 相对 BIN_DIR=out 会解析成子目录下不存在的 out/，导致 cpio 重定向失败
+          # （"out/...rootfs.cpio.gz: No such file or directory" → broken pipe）。
+          ARGS=(PROFILE="$PROFILE" PACKAGES="$PACKAGES" FILES=files-overlay BIN_DIR="$IB/out")
           [ "$PARTSIZE" -gt 0 ] && ARGS+=(ROOTFS_PARTSIZE="$PARTSIZE")
           make image "${ARGS[@]}"
 
       - name: 产物形状断言
         run: |
-          img="$(ls "$IB"/out/*.img.gz 2>/dev/null | head -1 || true)"
-          [ -n "$img" ] || { echo "::error::make image 没产出 .img.gz"; exit 1; }
+          # 不同目标产物名不同：VM/generic 出 *.img.gz，真实设备出 *-sysupgrade.bin /
+          # *-factory.bin / *.itb 等。断言「至少产出一个固件镜像」——即 out/ 里除
+          # 元数据（sha256sums / *.manifest / *.buildinfo / *.json）外还有文件。
+          imgs="$(find "$IB/out" -maxdepth 1 -type f \
+            ! -name sha256sums ! -name '*.manifest' ! -name '*.buildinfo' ! -name '*.json')"
+          [ -n "$imgs" ] || { echo "::error::make image 没产出任何固件镜像"; exit 1; }
+          echo "产出镜像："; echo "$imgs"
 
       - name: manifest 回归门禁（与上一版比，有包消失即 fail）
         run: |
@@ -193,8 +201,12 @@ jobs:
           LINEDIR="devices/${DEVICE}/${LINE}"
           RELDIR="${LINEDIR}/releases/${RELEASE_ID}"
           mkdir -p "stage/${RELDIR}"
-          cp "$IB"/out/*.img.gz "stage/${RELDIR}/"
-          cp "$IB"/out/sha256sums "stage/${RELDIR}/" 2>/dev/null || true
+          # 收全部固件镜像（设备 *-sysupgrade.bin/*-factory.bin、VM *.img.gz…），
+          # 元数据里 sha256sums 一并收，*.manifest/*.buildinfo/*.json 不进发布目录
+          # （image.manifest 下面单独按固定名收）。
+          find "$IB/out" -maxdepth 1 -type f \
+            ! -name '*.manifest' ! -name '*.buildinfo' ! -name '*.json' \
+            -exec cp {} "stage/${RELDIR}/" \;
           # 固定名收录，供下一版回归门禁比对（IB 原文件名带版本，不可预测）。
           cp curr.manifest "stage/${RELDIR}/image.manifest"
           "$WRT" meta manifest "$VARIANT" --release-id "$RELEASE_ID" --vermagic "$VERMAGIC" \

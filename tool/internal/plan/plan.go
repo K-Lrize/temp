@@ -34,7 +34,7 @@ type ToolchainEntry struct {
 	Repo      string `json:"repo"`
 	// Commit 是 CI 唯一信任的源码坐标，ref 只供人读。
 	Commit string `json:"commit"`
-	// LineTree 写进 build.json，与 Commit 分开存——排障时一眼区分是
+	// LineTree 写进工具链 meta.json，与 Commit 分开存——排障时一眼区分是
 	// 「我们自己配置改的」还是「源码改的」。
 	LineTree    string `json:"line_tree"`
 	Fingerprint string `json:"fingerprint"`

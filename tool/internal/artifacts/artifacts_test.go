@@ -43,14 +43,24 @@ func TestPaths(t *testing.T) {
 			"devices/mt3600be/25.12-mtk/releases/r20260731-1-abc1234",
 		},
 		{
-			"固件指针",
-			LatestPath("mt3600be", "25.12"),
-			"devices/mt3600be/25.12/latest.json",
+			"固件「当前状态」文件（可变指针，唯一可变）",
+			FirmwareCurrentPath("mt3600be", "25.12"),
+			"devices/mt3600be/25.12/current.json",
 		},
 		{
-			"包元数据与索引同目录",
-			PackagesMetaPath("25.12", "aarch64_generic"),
-			"25.12/packages/aarch64_generic/build-meta.json",
+			"不可变发布目录里的档案（GC 引用 + 溯源）",
+			ReleaseMetaPath("mt3600be", "25.12", "r1"),
+			"devices/mt3600be/25.12/releases/r1/meta.json",
+		},
+		{
+			"自有包「当前状态」文件（与索引同目录）",
+			PackagesCurrentPath("25.12", "aarch64_generic"),
+			"25.12/packages/aarch64_generic/current.json",
+		},
+		{
+			"不可变工具链构建目录里的档案",
+			BuildMetaPath("25.12-mtk", "mediatek", "filogic", "20260731-1-abc1234"),
+			"25.12-mtk/targets/mediatek/filogic/builds/20260731-1-abc1234/meta.json",
 		},
 	}
 
@@ -71,7 +81,7 @@ func TestOneDeviceTwoLinesDoNotCollide(t *testing.T) {
 	if a == b {
 		t.Fatalf("两条线的固件目录撞了: %s", a)
 	}
-	if LatestPath("mt3600be", "25.12") == LatestPath("mt3600be", "25.12-mtk") {
+	if FirmwareCurrentPath("mt3600be", "25.12") == FirmwareCurrentPath("mt3600be", "25.12-mtk") {
 		t.Fatal("两条线的指针撞了")
 	}
 }

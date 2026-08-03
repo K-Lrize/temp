@@ -13,17 +13,20 @@
 // 把 current.json 指回另一个 build-id），而 kmod 与 target base 包留在按
 // vermagic / target 键控的稳定路径上覆盖式发布，靠引用计数 GC 而不是靠
 // 不可变性管理生命周期。
+//
+// 每层只有两种文件，全线同名同形：
+//
+//	current.json  被 plan/消费方查询的路径上「当前状态 + 本层指纹」的可变文件。
+//	              plan 一次 GET 就拿到指纹判定是否重建（不再翻第二跳）。
+//	meta.json     不可变目录里的完整档案：GC 引用计数 + 人工溯源。plan 不读它。
 package artifacts
 
 import "path"
 
-// 每个位置下唯一可变的那个文件。其余一律不可变。
+// 两种角色的文件名。
 const (
-	FileCurrent  = "current.json"  // <line>/targets/<t>/<s>/ 下的工具链指针
-	FileLatest   = "latest.json"   // devices/<device>/<line>/ 下的固件指针
-	FileBuild    = "build.json"    // 一次工具链构建的元数据
-	FileManifest = "manifest.json" // 一次固件发布的元数据
-	FileMeta     = "build-meta.json"
+	FileCurrent = "current.json" // 每个被查询路径上「当前状态 + 指纹」的可变文件
+	FileMeta    = "meta.json"    // 不可变目录里的档案（GC 引用 + 溯源）
 )
 
 // LineRoot 是一条 line 的命名空间前缀。
@@ -34,9 +37,9 @@ func PackagesDir(line, arch string) string {
 	return path.Join(line, "packages", arch)
 }
 
-// PackagesMetaPath 与包索引同目录，记录这批包对应的 feed 指纹。
-func PackagesMetaPath(line, arch string) string {
-	return path.Join(PackagesDir(line, arch), FileMeta)
+// PackagesCurrentPath 与包索引同目录，记录这批包的 feed 指纹，供 plan 一跳比对。
+func PackagesCurrentPath(line, arch string) string {
+	return path.Join(PackagesDir(line, arch), FileCurrent)
 }
 
 // TargetDir 是一条 line 下某个 target/subtarget 的根。
@@ -44,7 +47,8 @@ func TargetDir(line, target, subtarget string) string {
 	return path.Join(line, "targets", target, subtarget)
 }
 
-// CurrentPath 是工具链指针，本目录下唯一可变的文件。
+// CurrentPath 是工具链「当前状态」文件：本目录下唯一可变的文件。
+// 带 line 指纹（plan 一跳）+ 取物句柄（self 线拉 SDK/IB）+ kmod_count（回归门禁）。
 func CurrentPath(line, target, subtarget string) string {
 	return path.Join(TargetDir(line, target, subtarget), FileCurrent)
 }
@@ -54,9 +58,10 @@ func BuildDir(line, target, subtarget, buildID string) string {
 	return path.Join(TargetDir(line, target, subtarget), "builds", buildID)
 }
 
-// BuildJSONPath 是不可变构建目录里的元数据。
-func BuildJSONPath(line, target, subtarget, buildID string) string {
-	return path.Join(BuildDir(line, target, subtarget, buildID), FileBuild)
+// BuildMetaPath 是不可变构建目录里的溯源档案。plan/GC/门禁都不读它（都读 current.json），
+// 纯为人工排障保留。
+func BuildMetaPath(line, target, subtarget, buildID string) string {
+	return path.Join(BuildDir(line, target, subtarget, buildID), FileMeta)
 }
 
 // KmodsDir 按内核 ABI 键控。已刷机设备固化的地址就在这里，路径必须永久稳定。
@@ -78,9 +83,10 @@ func DeviceLineDir(device, line string) string {
 	return path.Join("devices", device, line)
 }
 
-// LatestPath 是固件指针，本目录下唯一可变的文件。
-func LatestPath(device, line string) string {
-	return path.Join(DeviceLineDir(device, line), FileLatest)
+// FirmwareCurrentPath 是固件「当前状态」文件：本目录下唯一可变的文件。
+// 带 variant 指纹（plan 一跳）+ 指向的 release_id。
+func FirmwareCurrentPath(device, line string) string {
+	return path.Join(DeviceLineDir(device, line), FileCurrent)
 }
 
 // ReleaseDir 是一次固件发布的不可变目录。
@@ -88,27 +94,45 @@ func ReleaseDir(device, line, releaseID string) string {
 	return path.Join(DeviceLineDir(device, line), "releases", releaseID)
 }
 
-// ManifestPath 是不可变发布目录里的元数据。
-func ManifestPath(device, line, releaseID string) string {
-	return path.Join(ReleaseDir(device, line, releaseID), FileManifest)
+// ReleaseMetaPath 是不可变发布目录里的档案：GC 引用计数 + 溯源。
+func ReleaseMetaPath(device, line, releaseID string) string {
+	return path.Join(ReleaseDir(device, line, releaseID), FileMeta)
 }
 
-// Current 是工具链指针的内容：指向某一次不可变构建。
-// 回滚就是把它改回上一个 build_id。
+// Current 是工具链「当前状态」。
+//
+// Fingerprint（line 指纹）让 plan 一次 GET 就能判定是否重编；回滚就是把它整份
+// 改回上一个 build 的事实（指纹/句柄随之一起换，不会与 build 漂移）。
+// 其余字段：self 线据 SDKArchive/ImageBuilderArchive 取物；kmod 回归门禁读
+// KmodCount 与新构建比。
 type Current struct {
+	Fingerprint         string `json:"fingerprint"`
 	BuildID             string `json:"build_id"`
 	Vermagic            string `json:"vermagic"`
 	SDKArchive          string `json:"sdk_archive"`
 	ImageBuilderArchive string `json:"imagebuilder_archive"`
+	KmodCount           int    `json:"kmod_count"`
 	UpdatedAt           string `json:"updated_at"`
 }
 
-// Build 是一次工具链构建的溯源信息。
+// PackagesCurrent 是自有包层「当前状态」：只有一个 feed 指纹供 plan 比对。
+type PackagesCurrent struct {
+	Fingerprint string `json:"fingerprint"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
+// FirmwareCurrent 是固件「当前状态」：variant 指纹（plan 一跳）+ 指向的 release。
+type FirmwareCurrent struct {
+	Fingerprint string `json:"fingerprint"`
+	ReleaseID   string `json:"release_id"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
+// BuildMeta 是一次工具链构建的不可变溯源档案。
 //
-// LineTree 与 UpstreamCommit 刻意分成两个字段：排障时一眼能区分是
-// 「我们自己配置改的」还是「源码改的」。plan 比对时用同一种方式把它们重新
-// 组合成 line 指纹，远端不必再存一份组合后的字符串。
-type Build struct {
+// LineTree 与 UpstreamCommit 分成两个字段：排障时一眼区分「配置改的」还是
+// 「源码改的」。指纹已在 current.json 里算好，这里不再重复承担 plan 的判定。
+type BuildMeta struct {
 	BuildID        string `json:"build_id"`
 	Line           string `json:"line"`
 	Target         string `json:"target"`
@@ -119,41 +143,25 @@ type Build struct {
 	KernelVersion  string `json:"kernel_version"`
 	SDKSHA256      string `json:"sdk_sha256"`
 	IBSHA256       string `json:"ib_sha256"`
-	KmodCount      int    `json:"kmod_count"`
 	CIRunURL       string `json:"ci_run_url"`
 	CreatedAt      string `json:"created_at"`
 }
 
-// PackagesMeta 记录一批自有包对应的 feed 指纹，供下一次 plan 比对。
-type PackagesMeta struct {
-	FeedFingerprint string `json:"feed_fingerprint"`
-	UpdatedAt       string `json:"updated_at"`
-}
-
-// Latest 是固件指针。
-type Latest struct {
-	ReleaseID string `json:"release_id"`
-	UpdatedAt string `json:"updated_at"`
-}
-
-// Manifest 回答「这份固件到底是什么」，随固件一起发布，永久可查。
-type Manifest struct {
-	ReleaseID      string       `json:"release_id"`
-	Variant        string       `json:"variant"`
-	Device         string       `json:"device"`
-	Line           string       `json:"line"`
-	BuildID        string       `json:"build_id"`
-	Vermagic       string       `json:"vermagic"`
-	UpstreamCommit string       `json:"upstream_commit"`
-	Fingerprints   Fingerprints `json:"fingerprints"`
-	CIRunURL       string       `json:"ci_run_url"`
-	CreatedAt      string       `json:"created_at"`
-}
-
-// Fingerprints 是随产物一起发布的三层指纹：GC 靠它做引用计数，plan 靠它
-// 判定是否需要重建，人靠它定位是哪一层的变化触发了这次构建。
-type Fingerprints struct {
-	Line    string `json:"line"`
-	Feed    string `json:"feed"`
-	Variant string `json:"variant"`
+// ReleaseMeta 是一次固件发布的不可变档案。
+//
+// GC 靠 BuildID/Vermagic 做引用计数（保活对应工具链 build 与 kmod 仓）；
+// 回归门禁靠 ManifestFile 定位本版随固件发布的官方包清单（原名不改）。
+// Fingerprint 是 variant 指纹（与 current.json 一致，供人核对）。
+type ReleaseMeta struct {
+	ReleaseID      string `json:"release_id"`
+	Variant        string `json:"variant"`
+	Device         string `json:"device"`
+	Line           string `json:"line"`
+	BuildID        string `json:"build_id"`
+	Vermagic       string `json:"vermagic"`
+	UpstreamCommit string `json:"upstream_commit"`
+	Fingerprint    string `json:"fingerprint"`
+	ManifestFile   string `json:"manifest_file"`
+	CIRunURL       string `json:"ci_run_url"`
+	CreatedAt      string `json:"created_at"`
 }

@@ -10,7 +10,7 @@
 #   builds/<build_id>/sdk-ib/   （不可变，仅 CI 消费）
 #   kmods/<vermagic>/           （L2，设备运行期依赖）
 #   packages/                   （L2 base，target 核心包 + kernel）
-#   build.json（builds/<build_id>/，不可变）  current.json（唯一可变指针，最后发）
+#   meta.json（builds/<build_id>/，不可变档案）  current.json（唯一可变指针，带指纹/kmod数，最后发）
 
 name: (internal) Build toolchain target
 
@@ -33,7 +33,11 @@ on:
         required: true
         type: string
       line_tree:
-        description: "plan 算好的 line 目录树指纹，写进 build.json 供人工排障"
+        description: "plan 算好的 line 目录树指纹，写进 meta.json 供人工排障"
+        required: true
+        type: string
+      fingerprint:
+        description: "plan 算好的 line 指纹，写进 current.json 供 plan 一跳判定是否重编"
         required: true
         type: string
 
@@ -58,6 +62,7 @@ jobs:
       SUBTARGET: ${{ inputs.subtarget }}
       LINE_TREE: ${{ inputs.line_tree }}
       UPSTREAM_COMMIT: ${{ inputs.commit }}
+      FINGERPRINT: ${{ inputs.fingerprint }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -259,16 +264,14 @@ jobs:
           [ -f "out/base/packages.adb" ] || { echo "::error::缺 base 索引"; exit 1; }
           [ "${KMOD_COUNT:-0}" -gt 0 ] || { echo "::error::kmod 数为 0，编译多半残缺"; exit 1; }
           # kmod 下降检测：与上一次真实构建比，暴跌多半是编译残缺。首次无 current.json 则跳过。
-          PREV="$(curl -fsSL --connect-timeout 10 "$REPO_BASE/$LINE/targets/$TARGET/$SUBTARGET/current.json" 2>/dev/null | jq -r '.build_id // empty' || true)"
-          if [ -n "$PREV" ]; then
-            PC="$(curl -fsSL --connect-timeout 10 "$REPO_BASE/$LINE/targets/$TARGET/$SUBTARGET/builds/$PREV/build.json" 2>/dev/null | jq -r '.kmod_count // empty' || true)"
-            if [ -n "$PC" ] && [ "$PC" -gt 0 ]; then
-              MIN=$(( PC * 70 / 100 ))
-              [ "$KMOD_COUNT" -ge "$MIN" ] || { echo "::error::kmod 数 $KMOD_COUNT < 上次 $PC 的 70%（$MIN），疑似残缺"; exit 1; }
-            fi
+          # kmod_count 现在直接在 current.json 里，一跳读到（不再翻 builds/<id>/meta.json）。
+          PC="$(curl -fsSL --connect-timeout 10 "$REPO_BASE/$LINE/targets/$TARGET/$SUBTARGET/current.json" 2>/dev/null | jq -r '.kmod_count // empty' || true)"
+          if [ -n "$PC" ] && [ "$PC" -gt 0 ]; then
+            MIN=$(( PC * 70 / 100 ))
+            [ "$KMOD_COUNT" -ge "$MIN" ] || { echo "::error::kmod 数 $KMOD_COUNT < 上次 $PC 的 70%（$MIN），疑似残缺"; exit 1; }
           fi
 
-      - name: 生成 build.json / current.json
+      - name: 生成 meta.json / current.json
         env:
           BUILD_ID: ${{ steps.build_id.outputs.id }}
           VM_SEG: ${{ steps.kmod_meta.outputs.vm_seg }}
@@ -283,15 +286,17 @@ jobs:
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
           mkdir -p out/reg-build out/reg-current
+          # 不可变档案 meta.json：纯溯源（line_tree/commit 分列、sha256、内核版本）。
           "$WRT" meta build --line "$LINE" --target "$TARGET" --subtarget "$SUBTARGET" \
             --line-tree "$LINE_TREE" --upstream-commit "$UPSTREAM_COMMIT" \
             --build-id "$BUILD_ID" --vermagic "$VM_SEG" --kernel-version "$KVER" \
-            --sdk-sha256 "$SDK_SHA" --ib-sha256 "$IB_SHA" --kmod-count "$KMOD_COUNT" \
-            --ci-run-url "$RUN_URL" > out/reg-build/build.json
-          "$WRT" meta current --build-id "$BUILD_ID" --vermagic "$VM_SEG" \
-            --sdk "$SDK_FILE" --ib "$IB_FILE" > out/reg-current/current.json
+            --sdk-sha256 "$SDK_SHA" --ib-sha256 "$IB_SHA" \
+            --ci-run-url "$RUN_URL" > out/reg-build/meta.json
+          # 当前状态 current.json：line 指纹（plan 一跳）+ kmod_count（门禁一跳）+ 取物句柄。
+          "$WRT" meta current --fingerprint "$FINGERPRINT" --build-id "$BUILD_ID" --vermagic "$VM_SEG" \
+            --sdk "$SDK_FILE" --ib "$IB_FILE" --kmod-count "$KMOD_COUNT" > out/reg-current/current.json
 
-      - name: 发布到 R2（sdk-ib → kmod → base → build.json → current.json 指针最后）
+      - name: 发布到 R2（sdk-ib → kmod → base → meta.json → current.json 指针最后）
         env:
           BUILD_ID: ${{ steps.build_id.outputs.id }}
           VM_SEG: ${{ steps.kmod_meta.outputs.vm_seg }}

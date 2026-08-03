@@ -32,7 +32,7 @@ import (
 type Fingerprints struct {
 	// LineTree 是 line 目录树的哈希，**不含** upstream commit。
 	//
-	// 单独暴露是为了让 build.json 把「我们自己配置改的」与「源码改的」分成
+	// 单独暴露是为了让工具链 meta.json 把「我们自己配置改的」与「源码改的」分成
 	// 两个字段存——排障时一眼能区分是哪一边动了。
 	LineTree string `json:"line_tree"`
 	Line     string `json:"line"`
@@ -68,7 +68,7 @@ func (c *Computer) For(cfg *config.Config, v resolve.Variant) (Fingerprints, err
 
 	// upstream commit 是源码基线的另一半，但它不在磁盘上——它是 line.yaml
 	// 里的一个字段，已经被 lineTree 覆盖。这里再显式拼一次是为了让
-	// build.json 能用同样的方式从两个独立字段重新组合出 Line 指纹，
+	// 工具链 meta.json 能用同样的方式从两个独立字段重新组合出 Line 指纹，
 	// 而不必让远端也存一份组合后的字符串。
 	upstreamCommit := ""
 	if v.Line.Source != nil {

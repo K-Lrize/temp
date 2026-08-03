@@ -33,41 +33,31 @@ func NewHTTPRemote(base string, client *http.Client) Remote {
 	return &httpRemote{base: strings.TrimRight(base, "/"), client: client}
 }
 
+// 三层判定同形：读该层的 current.json，取 Fingerprint。指纹就存在指针里，
+// plan 一次 GET 即可，不再翻第二跳的不可变档案。
+
 func (r *httpRemote) ToolchainFingerprint(line, target, subtarget string) string {
-	var current artifacts.Current
-	if !r.fetch(artifacts.CurrentPath(line, target, subtarget), &current) || current.BuildID == "" {
+	var cur artifacts.Current
+	if !r.fetch(artifacts.CurrentPath(line, target, subtarget), &cur) {
 		return ""
 	}
-	var build artifacts.Build
-	if !r.fetch(artifacts.BuildJSONPath(line, target, subtarget, current.BuildID), &build) {
-		return ""
-	}
-	if build.LineTree == "" {
-		return ""
-	}
-	// 远端只存 line_tree 与 upstream_commit 两个独立字段，比对时用与本地
-	// 相同的方式重新组合——而不是让远端也维护一份组合后的指纹字符串。
-	return combine(build.LineTree, build.UpstreamCommit)
+	return cur.Fingerprint
 }
 
 func (r *httpRemote) PackagesFingerprint(line, arch string) string {
-	var meta artifacts.PackagesMeta
-	if !r.fetch(artifacts.PackagesMetaPath(line, arch), &meta) {
+	var cur artifacts.PackagesCurrent
+	if !r.fetch(artifacts.PackagesCurrentPath(line, arch), &cur) {
 		return ""
 	}
-	return meta.FeedFingerprint
+	return cur.Fingerprint
 }
 
 func (r *httpRemote) FirmwareFingerprint(device, line string) string {
-	var latest artifacts.Latest
-	if !r.fetch(artifacts.LatestPath(device, line), &latest) || latest.ReleaseID == "" {
+	var cur artifacts.FirmwareCurrent
+	if !r.fetch(artifacts.FirmwareCurrentPath(device, line), &cur) {
 		return ""
 	}
-	var manifest artifacts.Manifest
-	if !r.fetch(artifacts.ManifestPath(device, line, latest.ReleaseID), &manifest) {
-		return ""
-	}
-	return manifest.Fingerprints.Variant
+	return cur.Fingerprint
 }
 
 // fetch 取一份 JSON。任何失败都返回 false —— 调用方据此当作「不知道」。

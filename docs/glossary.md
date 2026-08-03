@@ -37,17 +37,17 @@
 
 ## C · 小票 / 指针类 —— R2 上那些 JSON
 
-两种:**小票** = 发了就不改,记"这东西是什么";**指针** = 一个目录里唯一能改的文件,指"现在该用哪个"。
+两种角色,全线同名同形:**`current.json`** = 每个被查询路径上唯一可变的**指针**,自带本层指纹(plan 一次读它就够)+ 取物句柄;**`meta.json`** = 不可变目录里的**档案**,记 GC 引用 + 溯源,plan 不读。
 
-| 文件 | 类型 | 是什么 | 住哪 |
+| 文件 | 角色 | 是什么 | 住哪 |
 |---|---|---|---|
-| **build.json** | 小票 | 一次 SDK/IB 构建的记录(vermagic、kmod 数、源码 commit、sha256) | `<line>/targets/<t>/<s>/builds/<build_id>/` |
-| **current.json** | **指针** | 指"当前该用哪个 build_id"。回滚 = 改它指别的 | `<line>/targets/<t>/<s>/current.json` |
-| **manifest.json** | 小票 | 一份固件的记录(设备/线/build_id/vermagic/三层指纹) | `.../releases/<release_id>/` |
-| **latest.json** | **指针** | 指"当前最新 release_id" | `devices/<d>/<line>/latest.json` |
-| **build-meta.json** | 小票 | 挨着 `packages.adb` 的一行:这批自有包对应哪个 feed 指纹 | `<line>/packages/<arch>/` |
+| **current.json**(工具链) | **指针** | line 指纹(plan 一跳)+ build_id/vermagic/SDK·IB 文件名 + kmod_count(门禁一跳)。回滚=改它指别的 | `<line>/targets/<t>/<s>/current.json` |
+| **current.json**(包) | **指针** | 这批自有包对应的 feed 指纹 | `<line>/packages/<arch>/current.json` |
+| **current.json**(固件) | **指针** | variant 指纹(plan 一跳)+ 指向的 release_id | `devices/<d>/<line>/current.json` |
+| **meta.json**(工具链) | 档案 | 一次 SDK/IB 构建的溯源(line_tree/commit 分列、vermagic、sha256、内核版本) | `.../builds/<build_id>/meta.json` |
+| **meta.json**(固件) | 档案 | 一份固件的记录:build_id/vermagic(GC 引用计数)+ manifest_file(门禁锚点)+ variant 指纹 | `.../releases/<release_id>/meta.json` |
 
-为什么分指针和不可变:每次构建单独存一份、永不覆盖 → 能溯源、能回滚;**回滚 = 只改指针那一个字,不动任何产物**。
+为什么分指针和不可变:每次构建单独存一份、永不覆盖 → 能溯源、能回滚;**回滚 = 只改指针那一个字,不动任何产物**。指纹存进指针本身,plan 判定"要不要重造"永远只读一次。
 
 ---
 
@@ -56,9 +56,8 @@
 只为一件事:让 `plan` 能回答"要不要重造":
 
 ```
-plan 读指针 (current.json / latest.json)
-  → 找到当前的小票 (build.json / manifest.json)
-  → 取出小票里存的指纹
+plan 读该层指针 current.json
+  → 直接取出里面存的指纹（无需第二跳）
   → 和本地现算的指纹比
      一样   → 跳过,不重造
      不一样 → 重造 → 生成新 build_id/release_id → 写新小票 → 改指针指向它

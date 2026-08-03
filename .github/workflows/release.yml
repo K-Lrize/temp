@@ -82,6 +82,7 @@ jobs:
       repo: ${{ matrix.t.repo }}
       commit: ${{ matrix.t.commit }}
       line_tree: ${{ matrix.t.line_tree }}
+      fingerprint: ${{ matrix.t.fingerprint }}
     secrets: inherit
 
   packages:

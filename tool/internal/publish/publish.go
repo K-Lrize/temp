@@ -4,9 +4,9 @@
 // 不 mock、不单测：mock 出来的 S3 行为与真实 R2 的差异本身就是一类 bug 源，
 // 这一层靠对真实 R2 的集成验证（`wrt publish` 的手动冒烟 / CI）。
 //
-// 发布顺序是硬约束——**内容 → 索引 → 指针**。设备在同步窗口内随时可能读到
-// 指针（current.json / latest.json），若指针先于它引用的内容/索引落地，设备
-// 就会拿到一个指向不存在对象的指针。PutDir 内置这个顺序。
+// 发布顺序是硬约束——**内容 → 索引 → 指针**。设备/plan 在同步窗口内随时可能读到
+// 指针（current.json），若指针先于它引用的内容/索引落地，就会拿到一个指向不存在
+// 对象的指针。PutDir 内置这个顺序。
 package publish
 
 import (
@@ -199,8 +199,9 @@ func isNotFound(err error) bool {
 	return false
 }
 
-// 发布顺序的三档。current.json / latest.json 是各自目录里唯一可变的指针，
-// 必须最后落地；packages.adb 是索引，落在内容之后、指针之前。
+// 发布顺序的三档。current.json 是各自目录里唯一可变的指针，必须最后落地
+// （落地时它指向的内容/索引都已就位）；packages.adb 是索引，落在内容之后、
+// 指针之前；meta.json 是不可变档案，属内容，随内容一起落。
 const (
 	classContent = iota
 	classIndex
@@ -209,7 +210,7 @@ const (
 
 func classify(name string) int {
 	switch name {
-	case "current.json", "latest.json":
+	case "current.json":
 		return classPointer
 	case "packages.adb":
 		return classIndex

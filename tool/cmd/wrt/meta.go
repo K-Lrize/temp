@@ -63,19 +63,22 @@ func variantFingerprints(c ctx, variantID string) (resolve.Variant, plan.Fingerp
 	return v, fp, nil
 }
 
+// runMetaManifest 产固件的不可变档案 meta.json（放 releases/<id>/）：GC 引用计数
+// 的 build_id/vermagic + 门禁定位官方清单的 manifest_file + variant 指纹。
 func runMetaManifest(c ctx, args []string) error {
 	fs := flag.NewFlagSet("meta manifest", flag.ContinueOnError)
 	fs.SetOutput(c.stderr)
 	releaseID := fs.String("release-id", "", "本次发布编号")
 	buildID := fs.String("build-id", "", "对应的工具链构建编号（official 线留空）")
 	vermagic := fs.String("vermagic", "", "内核 ABI 标识")
+	manifestFile := fs.String("manifest-file", "", "本版随固件发布的官方包清单文件名（回归门禁据此定位上一版）")
 	ciURL := fs.String("ci-run-url", "", "本次 CI run 链接")
 	rest, err := parseFlags(fs, args)
 	if err != nil {
 		return err
 	}
 	if len(rest) != 1 {
-		return errors.New("用法: wrt meta manifest <device>@<line> --release-id R --vermagic V")
+		return errors.New("用法: wrt meta manifest <device>@<line> --release-id R --vermagic V --manifest-file F")
 	}
 	if *releaseID == "" || *vermagic == "" {
 		return errors.New("meta manifest: --release-id 与 --vermagic 必填")
@@ -84,11 +87,11 @@ func runMetaManifest(c ctx, args []string) error {
 	if err != nil {
 		return err
 	}
-	return emitJSON(c.stdout, buildManifest(v, fp, *releaseID, *buildID, *vermagic, *ciURL, time.Now()))
+	return emitJSON(c.stdout, buildReleaseMeta(v, fp, *releaseID, *buildID, *vermagic, *manifestFile, *ciURL, time.Now()))
 }
 
-func buildManifest(v resolve.Variant, fp plan.Fingerprints, releaseID, buildID, vermagic, ciURL string, now time.Time) artifacts.Manifest {
-	return artifacts.Manifest{
+func buildReleaseMeta(v resolve.Variant, fp plan.Fingerprints, releaseID, buildID, vermagic, manifestFile, ciURL string, now time.Time) artifacts.ReleaseMeta {
+	return artifacts.ReleaseMeta{
 		ReleaseID:      releaseID,
 		Variant:        v.ID,
 		Device:         v.Device,
@@ -96,23 +99,38 @@ func buildManifest(v resolve.Variant, fp plan.Fingerprints, releaseID, buildID, 
 		BuildID:        buildID,
 		Vermagic:       vermagic,
 		UpstreamCommit: sourceCommit(v),
-		Fingerprints:   artifacts.Fingerprints{Line: fp.Line, Feed: fp.Feed, Variant: fp.Variant},
+		Fingerprint:    fp.Variant,
+		ManifestFile:   manifestFile,
 		CIRunURL:       ciURL,
 		CreatedAt:      stamp(now),
 	}
 }
 
+// runMetaLatest 产固件的「当前状态」current.json（放 devices/<d>/<line>/）：
+// variant 指纹（plan 一跳判定）+ 指向的 release。需要 variant 来算 variant 指纹。
 func runMetaLatest(c ctx, args []string) error {
 	fs := flag.NewFlagSet("meta latest", flag.ContinueOnError)
 	fs.SetOutput(c.stderr)
 	releaseID := fs.String("release-id", "", "指向的发布编号")
-	if _, err := parseFlags(fs, args); err != nil {
+	rest, err := parseFlags(fs, args)
+	if err != nil {
 		return err
+	}
+	if len(rest) != 1 {
+		return errors.New("用法: wrt meta latest <device>@<line> --release-id R")
 	}
 	if *releaseID == "" {
 		return errors.New("meta latest: --release-id 必填")
 	}
-	return emitJSON(c.stdout, artifacts.Latest{ReleaseID: *releaseID, UpdatedAt: stamp(time.Now())})
+	_, fp, err := variantFingerprints(c, rest[0])
+	if err != nil {
+		return err
+	}
+	return emitJSON(c.stdout, artifacts.FirmwareCurrent{
+		Fingerprint: fp.Variant,
+		ReleaseID:   *releaseID,
+		UpdatedAt:   stamp(time.Now()),
+	})
 }
 
 func runMetaBuild(c ctx, args []string) error {
@@ -123,7 +141,6 @@ func runMetaBuild(c ctx, args []string) error {
 	kernelVersion := fs.String("kernel-version", "", "内核版本")
 	sdkSHA := fs.String("sdk-sha256", "", "SDK 归档 sha256")
 	ibSHA := fs.String("ib-sha256", "", "ImageBuilder 归档 sha256")
-	kmodCount := fs.Int("kmod-count", 0, "本次产出的 kmod 数（供下次回归门禁比对）")
 	ciURL := fs.String("ci-run-url", "", "本次 CI run 链接")
 	// 设备无关路径：toolchain 是按 (line, target, subtarget) 的，没有设备。给全
 	// 这组 flag 就直接构造，透传 plan 已算好的 line_tree/commit（指纹只算一次）。
@@ -140,17 +157,17 @@ func runMetaBuild(c ctx, args []string) error {
 		return errors.New("meta build: --build-id 与 --vermagic 必填")
 	}
 
-	var b artifacts.Build
+	var b artifacts.BuildMeta
 	switch {
 	case *line != "" && len(rest) == 0:
 		b = buildBuildCore(*line, *target, *subtarget, *upstreamCommit, *lineTree,
-			*buildID, *vermagic, *kernelVersion, *sdkSHA, *ibSHA, *kmodCount, *ciURL, time.Now())
+			*buildID, *vermagic, *kernelVersion, *sdkSHA, *ibSHA, *ciURL, time.Now())
 	case *line == "" && len(rest) == 1:
 		v, fp, err := variantFingerprints(c, rest[0])
 		if err != nil {
 			return err
 		}
-		b = buildBuild(v, fp, *buildID, *vermagic, *kernelVersion, *sdkSHA, *ibSHA, *kmodCount, *ciURL, time.Now())
+		b = buildBuild(v, fp, *buildID, *vermagic, *kernelVersion, *sdkSHA, *ibSHA, *ciURL, time.Now())
 	default:
 		return errors.New("用法: wrt meta build --line L --target T --subtarget S --line-tree ... --build-id B --vermagic V ...  或  wrt meta build <device>@<line> --build-id B --vermagic V ...")
 	}
@@ -158,15 +175,16 @@ func runMetaBuild(c ctx, args []string) error {
 }
 
 // buildBuild 从 variant 取坐标（本地手动核对路径）。
-func buildBuild(v resolve.Variant, fp plan.Fingerprints, buildID, vermagic, kernelVersion, sdkSHA, ibSHA string, kmodCount int, ciURL string, now time.Time) artifacts.Build {
+func buildBuild(v resolve.Variant, fp plan.Fingerprints, buildID, vermagic, kernelVersion, sdkSHA, ibSHA, ciURL string, now time.Time) artifacts.BuildMeta {
 	return buildBuildCore(v.Line.ID, v.Hardware.Target, v.Hardware.Subtarget, sourceCommit(v), fp.LineTree,
-		buildID, vermagic, kernelVersion, sdkSHA, ibSHA, kmodCount, ciURL, now)
+		buildID, vermagic, kernelVersion, sdkSHA, ibSHA, ciURL, now)
 }
 
-// buildBuildCore 纯构造 build.json：line_tree（配置改的）与 upstream_commit（源码
-// 改的）分两字段，排障时一眼区分；plan 比对时再用同一种方式组合回 line 指纹。
-func buildBuildCore(line, target, subtarget, upstreamCommit, lineTree, buildID, vermagic, kernelVersion, sdkSHA, ibSHA string, kmodCount int, ciURL string, now time.Time) artifacts.Build {
-	return artifacts.Build{
+// buildBuildCore 纯构造工具链 meta.json：line_tree（配置改的）与 upstream_commit
+// （源码改的）分两字段，排障时一眼区分。指纹与 kmod_count 已在 current.json，
+// 这里不再重复（plan/门禁都读 current.json，不翻这份档案）。
+func buildBuildCore(line, target, subtarget, upstreamCommit, lineTree, buildID, vermagic, kernelVersion, sdkSHA, ibSHA, ciURL string, now time.Time) artifacts.BuildMeta {
+	return artifacts.BuildMeta{
 		BuildID:        buildID,
 		Line:           line,
 		Target:         target,
@@ -177,19 +195,22 @@ func buildBuildCore(line, target, subtarget, upstreamCommit, lineTree, buildID, 
 		KernelVersion:  kernelVersion,
 		SDKSHA256:      sdkSHA,
 		IBSHA256:       ibSHA,
-		KmodCount:      kmodCount,
 		CIRunURL:       ciURL,
 		CreatedAt:      stamp(now),
 	}
 }
 
+// runMetaCurrent 产工具链的「当前状态」current.json：line 指纹（plan 一跳判定）+
+// kmod_count（回归门禁一跳比对）+ 取物句柄（self 线拉 SDK/IB）。
 func runMetaCurrent(c ctx, args []string) error {
 	fs := flag.NewFlagSet("meta current", flag.ContinueOnError)
 	fs.SetOutput(c.stderr)
+	fingerprint := fs.String("fingerprint", "", "plan 已算好的 line 指纹（透传，指纹只算一次）")
 	buildID := fs.String("build-id", "", "指向的构建编号")
 	vermagic := fs.String("vermagic", "", "该构建的内核 ABI 标识")
 	sdk := fs.String("sdk", "", "SDK 归档文件名")
 	ib := fs.String("ib", "", "ImageBuilder 归档文件名")
+	kmodCount := fs.Int("kmod-count", 0, "本次产出的 kmod 数（供下次回归门禁比对）")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -197,10 +218,12 @@ func runMetaCurrent(c ctx, args []string) error {
 		return errors.New("meta current: --build-id 与 --vermagic 必填")
 	}
 	return emitJSON(c.stdout, artifacts.Current{
+		Fingerprint:         *fingerprint,
 		BuildID:             *buildID,
 		Vermagic:            *vermagic,
 		SDKArchive:          *sdk,
 		ImageBuilderArchive: *ib,
+		KmodCount:           *kmodCount,
 		UpdatedAt:           stamp(time.Now()),
 	})
 }
@@ -230,7 +253,7 @@ func runMetaPackages(c ctx, args []string) error {
 		return errors.New("用法: wrt meta packages --fingerprint <fp>  或  wrt meta packages <device>@<line>")
 	}
 
-	return emitJSON(c.stdout, artifacts.PackagesMeta{FeedFingerprint: feedFP, UpdatedAt: stamp(time.Now())})
+	return emitJSON(c.stdout, artifacts.PackagesCurrent{Fingerprint: feedFP, UpdatedAt: stamp(time.Now())})
 }
 
 // sourceCommit 取 variant 的上游源码 commit，official 线没有 source 时为空。

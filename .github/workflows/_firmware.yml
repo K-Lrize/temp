@@ -5,9 +5,10 @@
 # 与 scripts/local-ib.sh（本地测试工具）各走各的：这里在 GH runner 上直接
 # make image（runner 本身就是 ubuntu，装上依赖即可，不必再套 Docker）。
 #
-# 发布前一道 manifest 回归门禁：IB 每次产出的 .manifest 收进 release 目录（固定名
-# image.manifest），下次构建拉上一版比对，有包消失即 fail——直击「IB 条件依赖静默
-# 失效、某包悄悄少装」那类不会报错的坑。比对逻辑在 wrt verify manifest 里。
+# 发布前一道 manifest 回归门禁：IB 产出的官方 .manifest 原名收进 release 目录，
+# 其文件名记进旁挂 meta.json；下次构建据上一版 meta.json 的 manifest_file 拉上一版
+# 比对，有包消失即 fail——直击「IB 条件依赖静默失效、某包悄悄少装」那类不会报错的
+# 坑。比对逻辑在 wrt verify manifest 里。
 
 name: (internal) Assemble firmware
 
@@ -161,43 +162,41 @@ jobs:
 
       - name: manifest 回归门禁（与上一版比，有包消失即 fail）
         run: |
+          # curr = IB 产出的官方包清单（原名，不改名不复制）。
           CURR="$(ls "$IB_ROOT"/out/*.manifest 2>/dev/null | head -1 || true)"
           [ -n "$CURR" ] || { echo "::error::make image 没产出 .manifest"; exit 1; }
-          cp "$CURR" curr.manifest
-          # 上一版 = 当前 latest.json 指向的 release（本步在覆盖 latest 之前跑）。
-          # 存的是固定名 image.manifest，路径可预测、不必猜 IB 那串带版本的文件名。
+          # 记住本版清单文件名，下一步写进 meta.json 供下一版定位（清单原名带版本、不可预测）。
+          echo "MANIFEST_FILE=$(basename "$CURR")" >> "$GITHUB_ENV"
+          # 上一版 = 当前 current.json 指向的 release；其官方清单文件名记在该 release 的 meta.json 里。
           LINEDIR="devices/${DEVICE}/${LINE}"
-          PREV_RID="$(curl -fsSL --connect-timeout 15 "$REPO_BASE/$LINEDIR/latest.json" 2>/dev/null | jq -r '.release_id // empty' || true)"
+          PREV_RID="$(curl -fsSL --connect-timeout 15 "$REPO_BASE/$LINEDIR/current.json" 2>/dev/null | jq -r '.release_id // empty' || true)"
           PREV_ARG=""
           if [ -n "$PREV_RID" ]; then
-            if curl -fsSL --connect-timeout 15 -o prev.manifest \
-                 "$REPO_BASE/$LINEDIR/releases/$PREV_RID/image.manifest" 2>/dev/null; then
+            PREV_MF="$(curl -fsSL --connect-timeout 15 "$REPO_BASE/$LINEDIR/releases/$PREV_RID/meta.json" 2>/dev/null | jq -r '.manifest_file // empty' || true)"
+            if [ -n "$PREV_MF" ] && curl -fsSL --connect-timeout 15 -o prev.manifest \
+                 "$REPO_BASE/$LINEDIR/releases/$PREV_RID/$PREV_MF" 2>/dev/null; then
               PREV_ARG="--prev prev.manifest"
             else
-              echo "::warning::上一版 $PREV_RID 无 image.manifest（可能早于门禁上线），跳过比对"
+              echo "::warning::上一版 $PREV_RID 取不到官方清单（可能早于本模型），跳过比对"
             fi
           fi
-          "$WRT" verify manifest $PREV_ARG --curr curr.manifest
+          "$WRT" verify manifest $PREV_ARG --curr "$CURR"
 
-      - name: 组装发布目录（固件 + manifest + latest 指针）
+      - name: 组装发布目录（IB out/ 原样 + meta/current 旁挂）
         run: |
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          # R2 布局：devices/<device>/<line>/releases/<release_id>/。这里在 shell 里
-          # 拼路径，与 internal/artifacts 的规则保持一致。
           LINEDIR="devices/${DEVICE}/${LINE}"
           RELDIR="${LINEDIR}/releases/${RELEASE_ID}"
           mkdir -p "stage/${RELDIR}"
-          # 收全部固件镜像（设备 *-sysupgrade.bin/*-factory.bin、VM *.img.gz…），
-          # 元数据里 sha256sums 一并收，*.manifest/*.buildinfo/*.json 不进发布目录
-          # （image.manifest 下面单独按固定名收）。
-          find "$IB_ROOT/out" -maxdepth 1 -type f \
-            ! -name '*.manifest' ! -name '*.buildinfo' ! -name '*.json' \
-            -exec cp {} "stage/${RELDIR}/" \;
-          # 固定名收录，供下一版回归门禁比对（IB 原文件名带版本，不可预测）。
-          cp curr.manifest "stage/${RELDIR}/image.manifest"
+          # 严格官方：IB 的 out/ 整份原样收进 release 目录——镜像 + sha256sums +
+          # 原名 *.manifest + profiles.json + *.buildinfo + SBOM，不改名、不丢文件。
+          cp -a "$IB_ROOT/out/." "stage/${RELDIR}/"
+          # 旁挂控制面（官方没有、我们流程所需）：
+          #   meta.json    不可变档案：GC 引用计数(build_id/vermagic) + 门禁锚点(manifest_file) + variant 指纹
+          #   current.json 可变指针：variant 指纹(plan 一跳) + 指向的 release_id
           "$WRT" meta manifest "$VARIANT" --release-id "$RELEASE_ID" --vermagic "$VERMAGIC" \
-            --ci-run-url "$RUN_URL" > "stage/${RELDIR}/manifest.json"
-          "$WRT" meta latest --release-id "$RELEASE_ID" > "stage/${LINEDIR}/latest.json"
+            --manifest-file "$MANIFEST_FILE" --ci-run-url "$RUN_URL" > "stage/${RELDIR}/meta.json"
+          "$WRT" meta latest "$VARIANT" --release-id "$RELEASE_ID" > "stage/${LINEDIR}/current.json"
           find stage -type f | sed 's|^stage/||'
 
       - name: 发布到 R2（内容→索引→指针）

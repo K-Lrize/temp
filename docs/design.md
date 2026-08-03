@@ -223,19 +223,20 @@ r2://<bucket>/
 │
 ├── <line>/                                    ← 会被烧进设备，line 必须是前缀
 │   ├── packages/<arch>/                       【稳定】自有包，只增不删
-│   │   └── *.apk, packages.adb, build-meta.json
+│   │   └── *.apk, packages.adb, current.json【指针，带 feed 指纹】
 │   └── targets/<target>/<subtarget>/
-│       ├── current.json                       【指针】本目录唯一可变文件
+│       ├── current.json                       【指针】本目录唯一可变文件，带 line 指纹/kmod数/取物句柄
 │       ├── builds/<build-id>/                 【不可变】一次工具链构建一个目录
 │       │   ├── sdk-ib/{openwrt-sdk-*, openwrt-imagebuilder-*, sha256sums}
-│       │   └── build.json
+│       │   └── meta.json                      【档案】溯源
 │       ├── kmods/<vermagic>/                  【稳定】设备运行期直接命中
 │       └── packages/                          【稳定】target base 包
 │
 └── devices/<device>/<line>/                   ← 只被人和更新检查器读
-    ├── latest.json                            【指针】
-    └── releases/<release-id>/                 【不可变】
-        └── *.img.gz, *.manifest, manifest.json, resolved.json, sha256sums(.sig)
+    ├── current.json                           【指针】带 variant 指纹 + release_id
+    └── releases/<release-id>/                 【不可变】IB out/ 原样（官方文件集）+ meta.json
+        └── *.img.gz|*-sysupgrade.bin, sha256sums, *.manifest, profiles.json,
+            *.buildinfo, *.bom.cdx.json, meta.json【档案：GC 引用 + 门禁锚点】
 ```
 
 **为什么 SDK/IB 不可变而 kmod/target-base 覆盖式**：SDK/IB 只被 CI 自己消费，搬进
@@ -311,7 +312,7 @@ variant_fp = sha256(device.yaml + files/ + 该 device 实际 include 的 sets
 必须**只计入该设备实际引用到的 sets**，否则改一个没人用的包集会触发全设备重建 ——
 这个洞在有了包集之后会立刻变成日常痛点。
 
-`build.json` 里 `line_tree_sha` 与 `upstream_commit` 分两个字段存（排障时一眼区分
+工具链 `meta.json` 里 `line_tree` 与 `upstream_commit` 分两个字段存（排障时一眼区分
 "源码改的"还是"我们自己配置改的"），比对时用同一种方式重新组合。
 
 ---
@@ -460,7 +461,7 @@ rootfs 与 IB host。**离线备份私钥** —— 私钥丢失 = 所有已刷�
 | 项 | 要求 |
 | --- | --- |
 | 签名 | fail closed，无私钥直接失败 |
-| 上游归档 | 强制校验官方 `sha256sums`，结果记进 `build.json` |
+| 上游归档 | 强制校验官方 `sha256sums`，结果记进工具链 `meta.json` |
 | secret 传递 | 一律 `env:` + `$VAR`，不插值进 run 脚本体 |
 | 外部 feed | `feed/feeds.conf` pin 到 commit（否则 golang 版本随上游漂移，同一 commit 不可复现） |
 | `PKG_HASH` | lint 拒绝 `skip`/`SKIP` |

@@ -39,7 +39,7 @@ on:
         required: true
         type: string
       fingerprint:
-        description: "plan 算好的 packages 层指纹，写进 build-meta.json 供下次 plan 比对"
+        description: "plan 算好的 packages 层指纹，写进 current.json 供下次 plan 一跳比对"
         required: true
         type: string
 
@@ -190,10 +190,10 @@ jobs:
             echo "::warning::未找到 SDK 自带 apk，跳过自验"
           fi
 
-      - name: build-meta.json（透传 plan 的 packages 指纹）
+      - name: current.json（透传 plan 的 packages 指纹，供下次 plan 一跳比对）
         run: |
           OUT="out/packages/${ARCH}"
-          "$WRT" meta packages --fingerprint "$FINGERPRINT" > "$OUT/build-meta.json"
+          "$WRT" meta packages --fingerprint "$FINGERPRINT" > "$OUT/current.json"
 
       - name: 发布到 R2（内容→索引→标记，顺序由 wrt publish 内置）
         run: |

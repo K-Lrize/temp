@@ -129,8 +129,8 @@ func gcReleases(ctx context.Context, c ctx, cl *publish.Client, variants []resol
 
 		tcKey := d.line + "|" + d.target + "|" + d.subtarget
 		for _, rid := range live {
-			var m artifacts.Manifest
-			ok, err := cl.GetJSON(ctx, artifacts.ManifestPath(d.device, d.line, rid), &m)
+			var m artifacts.ReleaseMeta
+			ok, err := cl.GetJSON(ctx, artifacts.ReleaseMetaPath(d.device, d.line, rid), &m)
 			if err != nil {
 				return err
 			}

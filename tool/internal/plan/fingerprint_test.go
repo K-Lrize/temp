@@ -178,7 +178,7 @@ func TestFingerprintsAreLayered(t *testing.T) {
 }
 
 func TestLineTreeIsExposedSeparatelyFromUpstreamCommit(t *testing.T) {
-	// build.json 把「我们自己配置改的」与「源码改的」分成两个字段存，
+	// 工具链 meta.json 把「我们自己配置改的」与「源码改的」分成两个字段存，
 	// 排障时一眼能区分。所以树哈希要单独暴露，而不只有组合后的结果。
 	fps, _ := computeAll(t, tree(t))
 	fp := fps["router@25.12-mtk"]
